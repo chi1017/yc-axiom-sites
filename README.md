@@ -22,6 +22,9 @@ YC AXIOM「網站租用」系統的版型與建置腳本。**這個 repo 是公�
 | `build/` | 部署腳本：`build-site.mjs`（Actions 進入點）、`run.mjs`（流程）、`lib/`（Supabase、Cloudflare） |
 | `supabase/migrations/005_rental.sql` | 資料表、RLS、Storage 權限 |
 | `supabase/functions/publish-site/` | 發佈用 Edge Function（`dist/index.ts` 是可直接貼進 Supabase 的單一檔案） |
+| `supabase/migrations/007_rental_cron.sql`、`supabase/cron/` | 第三階段：排程記號欄位、月報、排程紀錄；`schedule_rental_cron.sql` 是 pg_cron 排程範本（要先填入專案代號與密碼，不進 repo） |
+| `supabase/functions/rental-cron/` | 每日排程（到期提醒、逾期、自動暫停、暫停滿 30 天通知）與每週一管理員摘要 |
+| `build/monthly-report.mjs`、`build/cleanup-photos.mjs` | 每月 1 日的 SEO／GEO 月報與舊照片清理（`.github/workflows/monthly-report.yml`） |
 | `tests/`、`supabase/tests/` | Node 單元測試、資料庫權限測試 |
 | `tools/` | 用官網的 SEO／GEO 引擎替建置結果打分數（驗收用） |
 
@@ -42,6 +45,6 @@ npm run bundle:function  # 重新打包 publish-site（改過 handler 或 templa
 
 ## GitHub Actions Secrets（Settings → Secrets and variables → Actions）
 
-`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`。
+`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`BREVO_API_KEY`（寄信）。
 
 這些值只存在 GitHub Secrets 與 Supabase Secrets，**不可以**寫進程式碼或 repo。
