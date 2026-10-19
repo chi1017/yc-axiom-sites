@@ -11,6 +11,14 @@ on:
         description: site_versions.id (uuid)，留空則使用 live_version_id
         required: false
         type: string
+      mode:
+        description: normal（部署客戶網站）或 maintenance（部署維護頁，僅限 suspended 的網站）
+        required: false
+        default: normal
+        type: choice
+        options:
+          - normal
+          - maintenance
 
 # 同一個網站同時只跑一個；後來的排隊，不取消正在跑的
 concurrency:
@@ -36,11 +44,11 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
           SITE_ID: ${{ inputs.site_id }}
+          MODE: ${{ inputs.mode }}
           VERSION_ID: ${{ inputs.version_id }}
         run: |
-          if [ -n "$VERSION_ID" ]; then
-            node build/build-site.mjs --site-id "$SITE_ID" --version-id "$VERSION_ID"
-          else
-            node build/build-site.mjs --site-id "$SITE_ID"
-          fi
+          ARGS=(--site-id "$SITE_ID" --mode "${MODE:-normal}")
+          if [ -n "$VERSION_ID" ]; then ARGS+=(--version-id "$VERSION_ID"); fi
+          node build/build-site.mjs "${ARGS[@]}"
