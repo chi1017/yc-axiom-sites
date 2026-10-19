@@ -22,10 +22,10 @@ function clip(s, n) {
 
 // templates/shared/palettes.js
 var PALETTES = {
-  forest: { label: "\u68EE\u6797\u7DA0", bg: "#F6F3EC", surface: "#EAE4D6", text: "#22301F", muted: "#4F5A4B", accent: "#2F4A3A", onAccent: "#F6F3EC", line: "#D8D1C1" },
-  caramel: { label: "\u7126\u7CD6\u68D5", bg: "#FBF6F0", surface: "#F0E3D3", text: "#3A2618", muted: "#6B5444", accent: "#8A5A3B", onAccent: "#FBF6F0", line: "#E2D2BE" },
-  ink: { label: "\u58A8\u591C\u91D1", bg: "#17161A", surface: "#24222A", text: "#F1ECE2", muted: "#B9B2A5", accent: "#C9A66B", onAccent: "#17161A", line: "#36333C" },
-  mist: { label: "\u9727\u85CD\u7070", bg: "#F3F5F6", surface: "#DDE5EA", text: "#1D2A33", muted: "#4C5C67", accent: "#3E5A6E", onAccent: "#F3F5F6", line: "#C9D3D9" }
+  forest: { label: "森林綠", bg: "#F6F3EC", surface: "#EAE4D6", text: "#22301F", muted: "#4F5A4B", accent: "#2F4A3A", onAccent: "#F6F3EC", line: "#D8D1C1" },
+  caramel: { label: "焦糖棕", bg: "#FBF6F0", surface: "#F0E3D3", text: "#3A2618", muted: "#6B5444", accent: "#8A5A3B", onAccent: "#FBF6F0", line: "#E2D2BE" },
+  ink: { label: "墨夜金", bg: "#17161A", surface: "#24222A", text: "#F1ECE2", muted: "#B9B2A5", accent: "#C9A66B", onAccent: "#17161A", line: "#36333C" },
+  mist: { label: "霧藍灰", bg: "#F3F5F6", surface: "#DDE5EA", text: "#1D2A33", muted: "#4C5C67", accent: "#3E5A6E", onAccent: "#F3F5F6", line: "#C9D3D9" }
 };
 var PALETTE_IDS = Object.keys(PALETTES);
 
@@ -51,7 +51,7 @@ var LIMITS = {
   social: 200
 };
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-var DAY_LABELS = { mon: "\u9031\u4E00", tue: "\u9031\u4E8C", wed: "\u9031\u4E09", thu: "\u9031\u56DB", fri: "\u9031\u4E94", sat: "\u9031\u516D", sun: "\u9031\u65E5" };
+var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
 var SECTION_KEYS = ["menu", "interior", "faq", "news"];
 function emptyHours() {
   const h = {};
@@ -239,12 +239,12 @@ var RESERVED_SLUGS = [
 ];
 function slugError(slug) {
   const s = String(slug == null ? "" : slug);
-  if (!s) return "\u8ACB\u586B\u7DB2\u5740\u4EE3\u7A31";
-  if (s.length < 3 || s.length > 30) return "\u7DB2\u5740\u4EE3\u7A31\u8981 3\u201330 \u500B\u5B57";
-  if (!/^[a-z0-9-]+$/.test(s)) return "\u53EA\u80FD\u4F7F\u7528\u5C0F\u5BEB\u82F1\u6587\u3001\u6578\u5B57\u8207\u9023\u5B57\u865F\uFF08-\uFF09";
-  if (s.startsWith("-") || s.endsWith("-")) return "\u958B\u982D\u8207\u7D50\u5C3E\u4E0D\u80FD\u662F\u9023\u5B57\u865F";
-  if (s.includes("--")) return "\u4E0D\u80FD\u9023\u7E8C\u5169\u500B\u9023\u5B57\u865F";
-  if (RESERVED_SLUGS.includes(s)) return "\u9019\u500B\u540D\u7A31\u662F\u7CFB\u7D71\u4FDD\u7559\u5B57\uFF0C\u8ACB\u63DB\u4E00\u500B";
+  if (!s) return "請填網址代稱";
+  if (s.length < 3 || s.length > 30) return "網址代稱要 3–30 個字";
+  if (!/^[a-z0-9-]+$/.test(s)) return "只能使用小寫英文、數字與連字號（-）";
+  if (s.startsWith("-") || s.endsWith("-")) return "開頭與結尾不能是連字號";
+  if (s.includes("--")) return "不能連續兩個連字號";
+  if (RESERVED_SLUGS.includes(s)) return "這個名稱是系統保留字，請換一個";
   return "";
 }
 
@@ -252,39 +252,39 @@ function slugError(slug) {
 function validateForPublish(content, sections, slug, raw) {
   const errors = [];
   const add = (field, msg) => errors.push({ field, msg });
-  if (!content.name) add("name", "\u8ACB\u586B\u5E97\u540D");
-  if (!content.address) add("address", "\u8ACB\u586B\u5E97\u5BB6\u5730\u5740");
-  if (!hasAnyHours(content.hours)) add("hours", "\u8ACB\u81F3\u5C11\u8A2D\u5B9A\u4E00\u5929\u7684\u71DF\u696D\u6642\u9593\uFF08\u6216\u6A19\u793A\u516C\u4F11\u4EE5\u5916\u7684\u6642\u6BB5\uFF09");
+  if (!content.name) add("name", "請填店名");
+  if (!content.address) add("address", "請填店家地址");
+  if (!hasAnyHours(content.hours)) add("hours", "請至少設定一天的營業時間（或標示公休以外的時段）");
   DAYS.forEach((d) => {
     const h = content.hours[d];
-    if (!h.closed && (h.open || h.close) && !(validTime(h.open) && validTime(h.close))) add("hours." + d, DAY_LABELS[d] + "\u7684\u71DF\u696D\u6642\u9593\u8981\u540C\u6642\u586B\u958B\u59CB\u8207\u7D50\u675F");
+    if (!h.closed && (h.open || h.close) && !(validTime(h.open) && validTime(h.close))) add("hours." + d, DAY_LABELS[d] + "的營業時間要同時填開始與結束");
   });
-  if (!content.photos.hero) add("photos.hero", "\u8ACB\u4E0A\u50B3\u4E00\u5F35\u4E3B\u8996\u89BA\u7167\u7247");
+  if (!content.photos.hero) add("photos.hero", "請上傳一張主視覺照片");
   const b = content.booking, rawB = raw && raw.booking || b;
   const rawUrl = String(rawB.url || "").trim();
-  if (rawUrl && !safeHttpsUrl(rawUrl)) add("booking.url", "\u8A02\u4F4D\u9023\u7D50\u5FC5\u9808\u662F https:// \u958B\u982D\u7684\u6709\u6548\u7DB2\u5740");
-  else if (b.label && !b.url || !b.label && b.url) add("booking", "\u8A02\u4F4D\u6309\u9215\u8981\u540C\u6642\u586B\u300C\u6309\u9215\u6587\u5B57\u300D\u8207\u300C\u9023\u7D50\u300D\uFF0C\u6216\u5169\u8005\u90FD\u7559\u7A7A");
+  if (rawUrl && !safeHttpsUrl(rawUrl)) add("booking.url", "訂位連結必須是 https:// 開頭的有效網址");
+  else if (b.label && !b.url || !b.label && b.url) add("booking", "訂位按鈕要同時填「按鈕文字」與「連結」，或兩者都留空");
   const rawS = raw && raw.social || {};
   [["instagram", "Instagram"], ["facebook", "Facebook"], ["line", "LINE"]].forEach(([k, label]) => {
     const v = String(rawS[k] || "").trim();
-    if (v && !safeHttpsUrl(v)) add("social." + k, label + " \u9023\u7D50\u5FC5\u9808\u662F https:// \u958B\u982D\u7684\u6709\u6548\u7DB2\u5740");
+    if (v && !safeHttpsUrl(v)) add("social." + k, label + " 連結必須是 https:// 開頭的有效網址");
   });
   if (sections.menu) {
     content.menu.forEach((m, i) => {
-      if (!m.name && !(m.price == null)) add("menu." + i, "\u83DC\u55AE\u7B2C " + (i + 1) + " \u9805\u7F3A\u5C11\u54C1\u540D");
-      else if (m.name && m.price == null) add("menu." + i, "\u83DC\u55AE\u7B2C " + (i + 1) + " \u9805\uFF08" + m.name + "\uFF09\u7F3A\u5C11\u50F9\u683C");
+      if (!m.name && !(m.price == null)) add("menu." + i, "菜單第 " + (i + 1) + " 項缺少品名");
+      else if (m.name && m.price == null) add("menu." + i, "菜單第 " + (i + 1) + " 項（" + m.name + "）缺少價格");
     });
   }
   if (sections.faq) {
     content.faq.forEach((f, i) => {
-      if (f.q && !f.a) add("faq." + i, "\u5E38\u898B\u554F\u984C\u7B2C " + (i + 1) + " \u984C\u7F3A\u5C11\u56DE\u7B54");
-      if (!f.q && f.a) add("faq." + i, "\u5E38\u898B\u554F\u984C\u7B2C " + (i + 1) + " \u984C\u7F3A\u5C11\u554F\u984C");
+      if (f.q && !f.a) add("faq." + i, "常見問題第 " + (i + 1) + " 題缺少回答");
+      if (!f.q && f.a) add("faq." + i, "常見問題第 " + (i + 1) + " 題缺少問題");
     });
   }
   if (sections.news) {
     content.news.forEach((n, i) => {
-      if (n.title && !n.date) add("news." + i, "\u6700\u65B0\u6D88\u606F\u7B2C " + (i + 1) + " \u5247\u7F3A\u5C11\u65E5\u671F");
-      if (!n.title && n.date) add("news." + i, "\u6700\u65B0\u6D88\u606F\u7B2C " + (i + 1) + " \u5247\u7F3A\u5C11\u6A19\u984C");
+      if (n.title && !n.date) add("news." + i, "最新消息第 " + (i + 1) + " 則缺少日期");
+      if (!n.title && n.date) add("news." + i, "最新消息第 " + (i + 1) + " 則缺少標題");
     });
   }
   const se = slugError(slug);
@@ -296,23 +296,22 @@ function validateForPublish(content, sections, slug, raw) {
 var esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 var CONTACT = { line: "@788cblaq", email: "ycaxiom@gmail.com" };
 function layout(title, bodyHtml) {
-  return `<!doctype html><html lang="zh-Hant"><body style="margin:0;background:#f5f4f0;font-family:-apple-system,BlinkMacSystemFont,'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#222"><div style="max-width:560px;margin:0 auto;padding:24px 16px"><div style="background:#fff;border-radius:10px;padding:24px 26px;line-height:1.7;font-size:15px"><h2 style="margin:0 0 14px;font-size:18px">` + esc(title) + "</h2>" + bodyHtml + '</div><p style="color:#888;font-size:12px;text-align:center;margin:14px 0 0">YC AXIOM \u7DB2\u7AD9\u79DF\u7528 \xB7 LINE ' + CONTACT.line + " \xB7 " + CONTACT.email + "</p></div></body></html>";
+  return `<!doctype html><html lang="zh-Hant"><body style="margin:0;background:#f5f4f0;font-family:-apple-system,BlinkMacSystemFont,'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#222"><div style="max-width:560px;margin:0 auto;padding:24px 16px"><div style="background:#fff;border-radius:10px;padding:24px 26px;line-height:1.7;font-size:15px"><h2 style="margin:0 0 14px;font-size:18px">` + esc(title) + "</h2>" + bodyHtml + '</div><p style="color:#888;font-size:12px;text-align:center;margin:14px 0 0">YC AXIOM 網站租用 · LINE ' + CONTACT.line + " · " + CONTACT.email + "</p></div></body></html>";
 }
 function adminFirstPublish({ shopName, slug, previewUrl, memberEmail, adminUrl }) {
-  const subject = "\u3010\u7DB2\u7AD9\u79DF\u7528\u3011\u65B0\u7684\u4E0A\u7DDA\u7533\u8ACB\uFF1A" + shopName;
-  const rows = [["\u5E97\u540D", shopName], ["\u7DB2\u5740\u4EE3\u7A31", slug], ["\u6703\u54E1\u4FE1\u7BB1", memberEmail]];
+  const subject = "【網站租用】新的上線申請：" + shopName;
+  const rows = [["店名", shopName], ["網址代稱", slug], ["會員信箱", memberEmail]];
   const html = layout(
-    "\u6709\u5BA2\u6236\u63D0\u51FA\u7DB2\u7AD9\u4E0A\u7DDA\u7533\u8ACB",
-    '<table style="border-collapse:collapse;width:100%">' + rows.map((r) => '<tr><td style="padding:6px 12px 6px 0;color:#777;white-space:nowrap">' + esc(r[0]) + '</td><td style="padding:6px 0">' + esc(r[1]) + "</td></tr>").join("") + '</table><p><a href="' + esc(previewUrl) + '" style="display:inline-block;background:#2f4a3a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">\u9810\u89BD\u5BA2\u6236\u7DB2\u7AD9</a></p><p style="color:#666;font-size:13px">\u72C0\u614B\u76EE\u524D\u662F\u300C\u5F85\u4E0A\u7DDA\u300D\u3002\u78BA\u8A8D\u6B3E\u9805\u5F8C\uFF0C\u5230 Supabase \u5C07\u72C0\u614B\u6539\u70BA live\uFF0C\u518D\u8ACB\u5BA2\u6236\u6309\u4E00\u6B21\u767C\u4F48\uFF08\u6216\u7531\u7BA1\u7406\u5F8C\u53F0\u4E0A\u7DDA\uFF0C\u7B2C\u4E8C\u968E\u6BB5\u63D0\u4F9B\uFF09\u3002</p>' + (adminUrl ? '<p style="font-size:13px"><a href="' + esc(adminUrl) + '">\u958B\u555F\u7BA1\u7406\u5F8C\u53F0</a></p>' : "")
+    "有客戶提出網站上線申請",
+    '<table style="border-collapse:collapse;width:100%">' + rows.map((r) => '<tr><td style="padding:6px 12px 6px 0;color:#777;white-space:nowrap">' + esc(r[0]) + '</td><td style="padding:6px 0">' + esc(r[1]) + "</td></tr>").join("") + '</table><p><a href="' + esc(previewUrl) + '" style="display:inline-block;background:#2f4a3a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">預覽客戶網站</a></p><p style="color:#666;font-size:13px">狀態目前是「待上線」。確認收到款項後，到管理後台「租用網站」按「確認收款」，系統會自動部署上線並通知客戶。</p>' + (adminUrl ? '<p style="font-size:13px"><a href="' + esc(adminUrl) + '">開啟管理後台</a></p>' : "")
   );
-  const text = ["\u6709\u5BA2\u6236\u63D0\u51FA\u7DB2\u7AD9\u4E0A\u7DDA\u7533\u8ACB", "", "\u5E97\u540D\uFF1A" + shopName, "\u7DB2\u5740\u4EE3\u7A31\uFF1A" + slug, "\u6703\u54E1\u4FE1\u7BB1\uFF1A" + memberEmail, "\u9810\u89BD\uFF1A" + previewUrl, "", "\u72C0\u614B\u76EE\u524D\u662F\u300C\u5F85\u4E0A\u7DDA\u300D\uFF0C\u78BA\u8A8D\u6B3E\u9805\u5F8C\u518D\u4E0A\u7DDA\u3002"].join("\n");
+  const text = ["有客戶提出網站上線申請", "", "店名：" + shopName, "網址代稱：" + slug, "會員信箱：" + memberEmail, "預覽：" + previewUrl, "", "狀態目前是「待上線」，確認收到款項後，到管理後台「租用網站」按「確認收款」即可上線。"].join("\n");
   return { subject, html, text };
 }
+var ADD_CONTACT = "為避免我們的信件被歸到垃圾信匣，請把 " + CONTACT.email + " 加入你的聯絡人；直接回覆這封信也會寄到我們的信箱。";
 
-// supabase/functions/publish-site/handler.mjs
+// supabase/functions/_shared/http.mjs
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var MIN_GAP_SECONDS = 20;
-var MAX_PER_DAY = 30;
 function corsHeaders(req, allowed) {
   const origin = req.headers.get("origin") || "";
   const h = { Vary: "Origin", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Max-Age": "86400" };
@@ -323,44 +322,49 @@ function parseOrigins(v) {
   return (v || "https://chi1017.github.io").split(",").map((s) => s.trim().replace(/\/$/, "")).filter(Boolean);
 }
 var json = (body, status, headers = {}) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers } });
+
+// supabase/functions/publish-site/handler.mjs
+var MIN_GAP_SECONDS = 20;
+var MAX_PER_DAY = 30;
 async function handlePublish(req, deps) {
   const cors = corsHeaders(req, deps.allowedOrigins);
   const reply = (b, s) => json(b, s, cors);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-  if (req.method !== "POST") return reply({ error: "method_not_allowed", message: "\u4E0D\u652F\u63F4\u7684\u8ACB\u6C42\u65B9\u5F0F" }, 405);
+  if (req.method !== "POST") return reply({ error: "method_not_allowed", message: "不支援的請求方式" }, 405);
   const origin = req.headers.get("origin") || "";
-  if (origin && !deps.allowedOrigins.includes(origin)) return reply({ error: "forbidden_origin", message: "\u4F86\u6E90\u4E0D\u88AB\u5141\u8A31" }, 403);
+  if (origin && !deps.allowedOrigins.includes(origin)) return reply({ error: "forbidden_origin", message: "來源不被允許" }, 403);
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   const user = token ? await deps.getUser(token).catch(() => null) : null;
-  if (!user || !user.id) return reply({ error: "unauthorized", message: "\u8ACB\u5148\u767B\u5165" }, 401);
+  if (!user || !user.id) return reply({ error: "unauthorized", message: "請先登入" }, 401);
   let body;
   try {
     const t = await req.text();
     if (t.length > 2e3) throw new Error("too big");
     body = JSON.parse(t);
   } catch {
-    return reply({ error: "bad_request", message: "\u8ACB\u6C42\u683C\u5F0F\u4E0D\u6B63\u78BA" }, 400);
+    return reply({ error: "bad_request", message: "請求格式不正確" }, 400);
   }
   const siteId = body && body.site_id;
-  if (typeof siteId !== "string" || !UUID.test(siteId)) return reply({ error: "bad_request", message: "\u7F3A\u5C11\u7DB2\u7AD9\u7DE8\u865F" }, 400);
+  if (typeof siteId !== "string" || !UUID.test(siteId)) return reply({ error: "bad_request", message: "缺少網站編號" }, 400);
   const { db: db2 } = deps;
   const now = (deps.now || (() => /* @__PURE__ */ new Date()))();
   const site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
-  if (!site) return reply({ error: "not_found", message: "\u627E\u4E0D\u5230\u9019\u500B\u7DB2\u7AD9" }, 404);
+  if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   const member = await db2.getOne("members", "id=eq." + user.id + "&select=consented_at,email");
-  if (!member || !member.consented_at) return reply({ error: "consent_required", message: "\u8ACB\u5148\u540C\u610F\u670D\u52D9\u689D\u6B3E\u8207\u96B1\u79C1\u6B0A\u653F\u7B56" }, 403);
+  if (!member || !member.consented_at) return reply({ error: "consent_required", message: "請先同意服務條款與隱私權政策" }, 403);
   if (site.status === "suspended" || site.status === "cancelled") {
-    return reply({ error: "not_allowed", message: site.status === "suspended" ? "\u7DB2\u7AD9\u76EE\u524D\u5DF2\u66AB\u505C\uFF0C\u8ACB\u806F\u7D61 YC AXIOM\uFF08LINE @788cblaq\uFF09" : "\u9019\u500B\u7DB2\u7AD9\u5DF2\u7D42\u6B62\u670D\u52D9" }, 403);
+    return reply({ error: "not_allowed", message: site.status === "suspended" ? "網站目前已暫停，請聯絡 YC AXIOM（LINE @788cblaq）" : "這個網站已終止服務" }, 403);
   }
+  if (site.status === "draft" && !site.terms_accepted_at) return reply({ error: "terms_required", message: "請先閱讀並同意網站租用條款" }, 403);
   const content = normalizeContent(site.content), palette = normalizePalette(site.palette), sections = normalizeSections(site.sections);
   const check = validateForPublish(content, sections, site.slug, site.content);
-  if (!check.ok) return reply({ error: "validation", message: "\u9084\u6709\u5FC5\u586B\u9805\u76EE\u6C92\u5B8C\u6210", errors: check.errors }, 422);
+  if (!check.ok) return reply({ error: "validation", message: "還有必填項目沒完成", errors: check.errors }, 422);
   const since = new Date(now.getTime() - 24 * 3600 * 1e3).toISOString();
   const recent = await db2.list("site_events", "site_id=eq." + siteId + "&type=in.(published_first,version_saved,deploy_queued)&created_at=gte." + encodeURIComponent(since) + "&select=created_at&order=created_at.desc&limit=" + MAX_PER_DAY);
-  if (recent.length && now.getTime() - new Date(recent[0].created_at).getTime() < MIN_GAP_SECONDS * 1e3) return reply({ error: "rate_limited", message: "\u64CD\u4F5C\u592A\u983B\u7E41\uFF0C\u8ACB\u7A0D\u5019\u5E7E\u79D2\u518D\u8A66" }, 429);
-  if (recent.length >= MAX_PER_DAY) return reply({ error: "rate_limited", message: "\u4ECA\u5929\u7684\u767C\u4F48\u6B21\u6578\u5DF2\u9054\u4E0A\u9650\uFF0C\u8ACB\u660E\u5929\u518D\u8A66" }, 429);
+  if (recent.length && now.getTime() - new Date(recent[0].created_at).getTime() < MIN_GAP_SECONDS * 1e3) return reply({ error: "rate_limited", message: "操作太頻繁，請稍候幾秒再試" }, 429);
+  if (recent.length >= MAX_PER_DAY) return reply({ error: "rate_limited", message: "今天的發佈次數已達上限，請明天再試" }, 429);
   const version = await db2.insertReturning("site_versions", { site_id: siteId, content, palette, sections });
-  if (!version || !version.id) return reply({ error: "server_error", message: "\u5132\u5B58\u7248\u672C\u5931\u6557\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66" }, 500);
+  if (!version || !version.id) return reply({ error: "server_error", message: "儲存版本失敗，請稍後再試" }, 500);
   const event = (type, detail) => db2.insert("site_events", { site_id: siteId, type, detail }).catch(() => {
   });
   if (site.status === "draft") {
@@ -369,19 +373,19 @@ async function handlePublish(req, deps) {
     const mail = adminFirstPublish({ shopName: content.name, slug: site.slug, previewUrl: deps.previewBase + "?site=" + siteId, memberEmail: member.email || user.email || "", adminUrl: deps.adminUrl });
     const r = await deps.sendMail({ to: deps.adminEmail, ...mail }).catch((e) => ({ ok: false, error: String(e) }));
     await event(r.ok ? "email_sent" : "email_failed", { template: "adminFirstPublish", ...r.ok ? {} : { error: String(r.error || "").slice(0, 200) } });
-    return reply({ ok: true, status: "pending", version_id: version.id, message: "\u5DF2\u9001\u51FA\u4E0A\u7DDA\u7533\u8ACB\u3002\u6211\u5011\u78BA\u8A8D\u5F8C\u6703\u70BA\u4F60\u958B\u901A\uFF0C\u4E26\u4EE5 Email \u901A\u77E5\u3002" }, 200);
+    return reply({ ok: true, status: "pending", version_id: version.id, message: "已送出上線申請。我們確認後會為你開通，並以 Email 通知。" }, 200);
   }
   if (site.status === "pending") {
     await event("version_saved", { version_id: version.id });
-    return reply({ ok: true, status: "pending", version_id: version.id, message: "\u5DF2\u66F4\u65B0\u9001\u5BE9\u7684\u5167\u5BB9\u3002\u7DB2\u7AD9\u958B\u901A\u5F8C\u6703\u4F7F\u7528\u6700\u65B0\u7248\u672C\u3002" }, 200);
+    return reply({ ok: true, status: "pending", version_id: version.id, message: "已更新送審的內容。網站開通後會使用最新版本。" }, 200);
   }
   await event("deploy_queued", { version_id: version.id });
   const d = await deps.dispatch({ siteId, versionId: version.id }).catch((e) => ({ ok: false, error: String(e) }));
   if (!d.ok) {
-    await event("deploy_failed", { message: "\u7121\u6CD5\u555F\u52D5\u90E8\u7F72\uFF1A" + String(d.error || "").slice(0, 200), version_id: version.id });
-    return reply({ error: "dispatch_failed", message: "\u66F4\u65B0\u6C92\u6709\u9001\u51FA\u6210\u529F\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u6309\u4E00\u6B21\u767C\u4F48\u3002\u4F60\u7684\u7DB2\u7AD9\u4ECD\u7DAD\u6301\u820A\u7248\u4E0A\u7DDA\u3002" }, 502);
+    await event("deploy_failed", { message: "無法啟動部署：" + String(d.error || "").slice(0, 200), version_id: version.id });
+    return reply({ error: "dispatch_failed", message: "更新沒有送出成功，請稍後再按一次發佈。你的網站仍維持舊版上線。" }, 502);
   }
-  return reply({ ok: true, status: site.status, updating: true, version_id: version.id, message: "\u66F4\u65B0\u5DF2\u9001\u51FA\uFF0C\u7D04 1\u20132 \u5206\u9418\u5F8C\u751F\u6548\u3002" }, 200);
+  return reply({ ok: true, status: site.status, updating: true, version_id: version.id, message: "更新已送出，約 1–2 分鐘後生效。" }, 200);
 }
 
 // build/lib/supabase.mjs
@@ -395,7 +399,7 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
       body: body === void 0 ? void 0 : JSON.stringify(body)
     });
     const text = await res.text();
-    if (!res.ok) throw new Error("Supabase " + method + " " + path.split("?")[0] + " \u2192 " + res.status + " " + text.slice(0, 200));
+    if (!res.ok) throw new Error("Supabase " + method + " " + path.split("?")[0] + " → " + res.status + " " + text.slice(0, 200));
     return text ? JSON.parse(text) : null;
   }
   return {
@@ -418,9 +422,56 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     },
     async download(bucket, path) {
       const res = await fetchImpl(base + "/storage/v1/object/" + bucket + "/" + path.split("/").map(encodeURIComponent).join("/"), { headers: headers() });
-      if (!res.ok) throw new Error("Storage download " + path + " \u2192 " + res.status);
+      if (!res.ok) throw new Error("Storage download " + path + " → " + res.status);
       return Buffer.from(await res.arrayBuffer());
     }
+  };
+}
+
+// supabase/functions/_shared/brevo.mjs
+var SENDER = { name: "YC AXIOM 網站租用", email: "ycaxiom@gmail.com" };
+function makeBrevoSender({ apiKey, fetchImpl = fetch, timeoutMs = 1e4 }) {
+  return async function sendMail2(m) {
+    if (!apiKey) return { ok: false, error: "BREVO_API_KEY 未設定" };
+    if (!m || !m.to) return { ok: false, error: "沒有收件人" };
+    try {
+      const res = await fetchImpl("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: { "api-key": apiKey, "Content-Type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ sender: SENDER, replyTo: { email: SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      if (res.ok) return { ok: true };
+      return { ok: false, error: "brevo " + res.status + " " + String(await res.text()).slice(0, 200) };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e).slice(0, 200) };
+    }
+  };
+}
+
+// supabase/functions/_shared/runtime.mjs
+function makeGetUser({ supabaseUrl, anonKey, fetchImpl = fetch }) {
+  return async function getUser2(token) {
+    const res = await fetchImpl(supabaseUrl + "/auth/v1/user", { headers: { apikey: anonKey, Authorization: "Bearer " + token }, signal: AbortSignal.timeout(8e3) });
+    if (!res.ok) return null;
+    const u = await res.json();
+    if (!u || !u.id) return null;
+    return { id: u.id, email: u.email, isAdmin: !!(u.app_metadata && u.app_metadata.role === "admin") };
+  };
+}
+function makeDispatcher({ token, repo, ref = "main", fetchImpl = fetch }) {
+  return async function dispatch2({ siteId, versionId, mode }) {
+    if (!token) return { ok: false, error: "GITHUB_DISPATCH_TOKEN 未設定" };
+    const inputs = { site_id: siteId };
+    if (versionId) inputs.version_id = versionId;
+    if (mode) inputs.mode = mode;
+    const res = await fetchImpl("https://api.github.com/repos/" + repo + "/actions/workflows/deploy-site.yml/dispatches", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "yc-axiom-sites-functions" },
+      body: JSON.stringify({ ref: ref || "main", inputs }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    return res.status === 204 ? { ok: true } : { ok: false, error: "github " + res.status };
   };
 }
 
@@ -437,6 +488,9 @@ var GH_TOKEN = Deno.env.get("GITHUB_DISPATCH_TOKEN") || "";
 var BREVO = Deno.env.get("BREVO_API_KEY") || "";
 var ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "ycaxiom@gmail.com";
 var REPO = Deno.env.get("GITHUB_REPO") || "chi1017/yc-axiom-sites";
+var sendMail = makeBrevoSender({ apiKey: BREVO });
+var getUser = makeGetUser({ supabaseUrl: SUPABASE_URL, anonKey: ANON });
+var dispatch = makeDispatcher({ token: GH_TOKEN, repo: REPO, ref: Deno.env.get("GITHUB_REF") || "main" });
 var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
 Deno.serve((req) => handlePublish(req, {
   allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")),
@@ -444,30 +498,7 @@ Deno.serve((req) => handlePublish(req, {
   adminUrl: SITE_BASE + "admin/",
   adminEmail: ADMIN_EMAIL,
   db,
-  async getUser(token) {
-    const res = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { apikey: ANON, Authorization: "Bearer " + token }, signal: AbortSignal.timeout(8e3) });
-    if (!res.ok) return null;
-    const u = await res.json();
-    return u && u.id ? { id: u.id, email: u.email } : null;
-  },
-  async sendMail(m) {
-    if (!BREVO) return { ok: false, error: "BREVO_API_KEY \u672A\u8A2D\u5B9A" };
-    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-      method: "POST",
-      headers: { "api-key": BREVO, "Content-Type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ sender: { name: "YC AXIOM \u7DB2\u7AD9\u79DF\u7528", email: "ycaxiom@gmail.com" }, replyTo: { email: "ycaxiom@gmail.com" }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
-      signal: AbortSignal.timeout(1e4)
-    });
-    return res.ok ? { ok: true } : { ok: false, error: "brevo " + res.status + " " + (await res.text()).slice(0, 200) };
-  },
-  async dispatch({ siteId, versionId }) {
-    if (!GH_TOKEN) return { ok: false, error: "GITHUB_DISPATCH_TOKEN \u672A\u8A2D\u5B9A" };
-    const res = await fetch("https://api.github.com/repos/" + REPO + "/actions/workflows/deploy-site.yml/dispatches", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + GH_TOKEN, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "yc-axiom-publish-site" },
-      body: JSON.stringify({ ref: "main", inputs: { site_id: siteId, version_id: versionId } }),
-      signal: AbortSignal.timeout(1e4)
-    });
-    return res.status === 204 ? { ok: true } : { ok: false, error: "github " + res.status };
-  }
+  getUser,
+  sendMail,
+  dispatch
 }));
