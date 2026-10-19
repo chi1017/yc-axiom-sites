@@ -3,20 +3,11 @@ import { normalizeContent, normalizePalette, normalizeSections } from '../../../
 import { validateForPublish } from '../../../templates/shared/validate.js';
 import { adminFirstPublish } from '../_shared/emails.mjs';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
+export { corsHeaders, parseOrigins };
+
 const MIN_GAP_SECONDS = 20;
 const MAX_PER_DAY = 30;
-
-export function corsHeaders(req, allowed) {
-  const origin = req.headers.get('origin') || '';
-  const h = { Vary: 'Origin', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Max-Age': '86400' };
-  if (origin && allowed.includes(origin)) h['Access-Control-Allow-Origin'] = origin;
-  return h;
-}
-export function parseOrigins(v) {
-  return (v || 'https://chi1017.github.io').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
-}
-const json = (body, status, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers } });
 
 /**
  * deps: {
@@ -54,6 +45,9 @@ export async function handlePublish(req, deps) {
   if (site.status === 'suspended' || site.status === 'cancelled') {
     return reply({ error: 'not_allowed', message: site.status === 'suspended' ? '網站目前已暫停，請聯絡 YC AXIOM（LINE @788cblaq）' : '這個網站已終止服務' }, 403);
   }
+
+  // 第一次發佈前必須已同意租用條款（會員在編輯器勾選後由 rental_accept_terms 寫入）
+  if (site.status === 'draft' && !site.terms_accepted_at) return reply({ error: 'terms_required', message: '請先閱讀並同意網站租用條款' }, 403);
 
   // 以資料庫裡的草稿為準（不相信瀏覽器送來的內容）
   const content = normalizeContent(site.content), palette = normalizePalette(site.palette), sections = normalizeSections(site.sections);
