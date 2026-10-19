@@ -1,0 +1,4 @@
+# 此專案的 Edge Function 設定（沒有任何祕密）
+# verify_jwt = false：函式在程式碼內自行向 Auth 查證登入身分（與官網既有函式一致）
+[functions.publish-site]
+verify_jwt = false
