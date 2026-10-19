@@ -1,0 +1,20 @@
+{
+  "name": "yc-axiom-sites",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "YC AXIOM 網站租用系統：版型、建置與部署腳本（不含任何祕密與客戶資料）",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build:sample": "node build/build-sample.mjs",
+    "bundle:function": "node build/bundle-function.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "linkedom": "0.18.13",
+    "wrangler": "4.151.2"
+  }
+}
