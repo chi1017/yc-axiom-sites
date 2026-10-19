@@ -7,6 +7,8 @@
 // SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY 由 Supabase 自動提供。
 import { handlePublish, parseOrigins } from './handler.mjs';
 import { makeSupabase } from '../../../build/lib/supabase.mjs';
+import { makeBrevoSender } from '../_shared/brevo.mjs';
+import { makeGetUser, makeDispatcher } from '../_shared/runtime.mjs';
 
 const need = (k) => { const v = Deno.env.get(k); if (!v) throw new Error('missing secret ' + k); return v; };
 const SUPABASE_URL = need('SUPABASE_URL');
@@ -16,6 +18,9 @@ const GH_TOKEN = Deno.env.get('GITHUB_DISPATCH_TOKEN') || '';
 const BREVO = Deno.env.get('BREVO_API_KEY') || '';
 const ADMIN_EMAIL = Deno.env.get('ADMIN_EMAIL') || 'ycaxiom@gmail.com';
 const REPO = Deno.env.get('GITHUB_REPO') || 'chi1017/yc-axiom-sites';
+const sendMail = makeBrevoSender({ apiKey: BREVO });
+const getUser = makeGetUser({ supabaseUrl: SUPABASE_URL, anonKey: ANON });
+const dispatch = makeDispatcher({ token: GH_TOKEN, repo: REPO, ref: Deno.env.get('GITHUB_REF') || 'main' });
 const SITE_BASE = Deno.env.get('OFFICIAL_SITE_URL') || 'https://chi1017.github.io/yc-axiom-site/';
 
 Deno.serve((req) => handlePublish(req, {
@@ -24,30 +29,7 @@ Deno.serve((req) => handlePublish(req, {
   adminUrl: SITE_BASE + 'admin/',
   adminEmail: ADMIN_EMAIL,
   db,
-  async getUser(token) {
-    const res = await fetch(SUPABASE_URL + '/auth/v1/user', { headers: { apikey: ANON, Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const u = await res.json();
-    return u && u.id ? { id: u.id, email: u.email } : null;
-  },
-  async sendMail(m) {
-    if (!BREVO) return { ok: false, error: 'BREVO_API_KEY 未設定' };
-    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: { 'api-key': BREVO, 'Content-Type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ sender: { name: 'YC AXIOM 網站租用', email: 'ycaxiom@gmail.com' }, replyTo: { email: 'ycaxiom@gmail.com' }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
-      signal: AbortSignal.timeout(10000)
-    });
-    return res.ok ? { ok: true } : { ok: false, error: 'brevo ' + res.status + ' ' + (await res.text()).slice(0, 200) };
-  },
-  async dispatch({ siteId, versionId }) {
-    if (!GH_TOKEN) return { ok: false, error: 'GITHUB_DISPATCH_TOKEN 未設定' };
-    const res = await fetch('https://api.github.com/repos/' + REPO + '/actions/workflows/deploy-site.yml/dispatches', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + GH_TOKEN, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', 'User-Agent': 'yc-axiom-publish-site' },
-      body: JSON.stringify({ ref: 'main', inputs: { site_id: siteId, version_id: versionId } }),
-      signal: AbortSignal.timeout(10000)
-    });
-    return res.status === 204 ? { ok: true } : { ok: false, error: 'github ' + res.status };
-  }
+  getUser,
+  sendMail,
+  dispatch
 }));

@@ -5,9 +5,12 @@ import { buildSite, imagePlan } from '../templates/shared/site.js';
 import { normalizeContent, normalizePalette, normalizeSections } from '../templates/shared/content.js';
 import { validateForPublish } from '../templates/shared/validate.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './lib/images.mjs';
+import { buildMaintenancePage } from '../templates/shared/maintenance.js';
+import { customerGoLive } from '../supabase/functions/_shared/emails.mjs';
 
 const BUCKET = 'site-photos';
-const DEPLOYABLE = ['live', 'overdue'];
+const DEPLOYABLE = ['live', 'overdue'];   // 一般建置只允許這兩種；維護模式只允許 suspended
+const MODES = ['normal', 'maintenance'];
 
 export const HEADERS_FILE = `/*
   X-Content-Type-Options: nosniff
@@ -16,12 +19,16 @@ export const HEADERS_FILE = `/*
   Cache-Control: public, max-age=3600
 `;
 
-export async function runBuild({ siteId, versionId, outDir, db, cf, deploy, log = console.log, now = () => new Date() }) {
+// mode: 'normal'（部署客戶網站）｜'maintenance'（部署「維護中」頁，僅限 suspended）
+// sendMail?: ({to,subject,html,text}) → {ok,error?}  部署成功後寄「網站已上線」信；失敗只記錄，絕不影響部署結果
+export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db, cf, deploy, sendMail, log = console.log, now = () => new Date() }) {
   const t0 = Date.now();
   const event = (type, detail) => db.insert('site_events', { site_id: siteId, type, detail }).catch((e) => log('event 寫入失敗：' + e.message));
   try {
+    if (!MODES.includes(mode)) throw new Error('不支援的建置模式：' + mode);
     const site = await db.getOne('rental_sites', 'id=eq.' + encodeURIComponent(siteId) + '&select=*');
     if (!site) throw new Error('找不到網站 ' + siteId);
+    if (mode === 'maintenance') return await runMaintenance({ site, outDir, db, cf, deploy, event, log, t0, now });
     if (!DEPLOYABLE.includes(site.status)) throw new Error('網站狀態是 ' + site.status + '，不會部署（只有 live／overdue 會部署）');
     const vid = versionId || site.live_version_id;
     if (!vid) throw new Error('這個網站還沒有指定上線版本（live_version_id）');
@@ -33,7 +40,9 @@ export async function runBuild({ siteId, versionId, outDir, db, cf, deploy, log 
     if (!check.ok) throw new Error('內容未通過檢查：' + check.errors.map((e) => e.msg).join('、'));
 
     const project = await cf.ensureProject(site.cf_project_name || site.slug);
-    const siteUrl = 'https://' + project.subdomain + '/';
+    // 自訂網域已生效（domain_status=active）時，canonical／sitemap／JSON-LD 都改用自訂網域
+    const useCustom = site.custom_domain && site.domain_status === 'active';
+    const siteUrl = 'https://' + (useCustom ? site.custom_domain : project.subdomain) + '/';
     log('Cloudflare 專案：' + project.name + (project.created ? '（新建立）' : '') + ' → ' + siteUrl);
 
     const built = buildSite({ template: site.template, content, palette, sections, siteUrl, lastmod: now().toISOString().slice(0, 10) });
@@ -60,11 +69,54 @@ export async function runBuild({ siteId, versionId, outDir, db, cf, deploy, log 
     });
     await event('deploy_ok', { url: siteUrl, version_id: vid, seconds: Math.round((Date.now() - t0) / 1000) });
     log('部署完成：' + siteUrl);
+    await notifyGoLive({ site, content, siteUrl, db, sendMail, event, log, now });
     return { ok: true, url: siteUrl };
   } catch (e) {
     const msg = String(e && e.message ? e.message : e).replace(/(Bearer\s+)[\w.\-]+/gi, '$1***').slice(0, 500);
-    await event('deploy_failed', { message: msg, version_id: versionId || null });
+    await event('deploy_failed', { message: msg, version_id: versionId || null, ...(mode === 'maintenance' ? { mode } : {}) });
     log('部署失敗：' + msg);
     return { ok: false, error: msg };
   }
+}
+
+// 第一次成功上線 → 寄信給客戶（只寄一次，以 go_live_notified_at 判斷）。任何錯誤都吞掉並記錄。
+async function notifyGoLive({ site, content, siteUrl, db, sendMail, event, log, now }) {
+  if (!sendMail || site.go_live_notified_at) return;
+  try {
+    const member = await db.getOne('members', 'id=eq.' + encodeURIComponent(site.member_id) + '&select=email');
+    if (!member || !member.email) { await event('email_failed', { template: 'customerGoLive', error: '找不到客戶 Email' }); return; }
+    const mail = customerGoLive({ shopName: content.name || site.slug, url: siteUrl });
+    const r = await sendMail({ to: member.email, ...mail });
+    if (r && r.ok) {
+      await db.patch('rental_sites', 'id=eq.' + encodeURIComponent(site.id), { go_live_notified_at: now().toISOString() });
+      await event('email_sent', { template: 'customerGoLive' });
+    } else {
+      await event('email_failed', { template: 'customerGoLive', error: String((r && r.error) || 'unknown').slice(0, 200) });
+    }
+  } catch (e) {
+    log('上線通知信失敗（不影響部署）：' + e.message);
+    await event('email_failed', { template: 'customerGoLive', error: String(e.message || e).slice(0, 200) });
+  }
+}
+
+// 維護模式：把「網站維護中」頁部署到同一個專案（網址不變）。不動 live_version_id，恢復時才能回到原版本。
+async function runMaintenance({ site, outDir, db, cf, deploy, event, log, t0, now }) {
+  if (site.status !== 'suspended') throw new Error('網站狀態是 ' + site.status + '，維護頁只會部署在 suspended 的網站');
+  if (!site.cf_project_name) {
+    await event('deploy_ok', { mode: 'maintenance', skipped: '尚未部署過，沒有需要換成維護頁的網站' });
+    log('尚未部署過，略過維護頁');
+    return { ok: true, skipped: true };
+  }
+  const project = await cf.ensureProject(site.cf_project_name);
+  const shopName = (site.content && site.content.name) || '';
+  const page = buildMaintenancePage({ shopName });
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+  for (const [f, c] of Object.entries(page.files)) writeFileSync(join(outDir, f), c);
+  writeFileSync(join(outDir, '_headers'), HEADERS_FILE + '/*\n  X-Robots-Tag: noindex, nofollow\n');
+  await deploy({ dir: outDir, project: project.name });
+  await db.patch('rental_sites', 'id=eq.' + encodeURIComponent(site.id), { last_published_at: now().toISOString() });
+  await event('deploy_ok', { mode: 'maintenance', url: site.public_url || null, seconds: Math.round((Date.now() - t0) / 1000) });
+  log('維護頁已部署：' + project.name);
+  return { ok: true, maintenance: true };
 }
