@@ -1,0 +1,165 @@
+import { esc, jsonForScript, len, clip } from './escape.js';
+import { hoursSummary, openingHoursSpec } from './hours.js';
+import { parseAddress } from './region.js';
+import { liveMenu, liveFaq } from './content.js';
+
+const MIN_DESC = 80, MAX_DESC = 160;
+
+export function regionLabel(content) {
+  const r = parseAddress(content.address);
+  return r.region || r.city || '';
+}
+
+export function buildTitle(content, tpl) {
+  const name = content.name || '你的店名';
+  const region = regionLabel(content);
+  return clip(name + '｜' + region + tpl.kindLabel, 60);
+}
+
+function firstSentence(text, max) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const m = t.match(/^[^。！？!?]+[。！？!?]?/);
+  const s = (m ? m[0] : t).trim();
+  return len(s) > max ? '' : (/[。！？!?]$/.test(s) ? s : s + '。');
+}
+
+// 目標 80–160 字（以字元計）。依序加入可用資訊，不夠就補通用句，過長就停止加入。
+export function buildDescription(content, tpl) {
+  const name = content.name || '本店';
+  const region = regionLabel(content);
+  const where = region ? '位於' + region : '';
+  const lead = content.tagline
+    ? name + where + '，' + content.tagline.replace(/[。.]+$/, '') + '。'
+    : name + (where ? where + '的' : '是一間') + tpl.kindLabel + '。';
+  const parts = [clip(lead, 120)];
+  const hs = hoursSummary(content.hours);
+  const menu = liveMenu(content).slice(0, 3).map((m) => m.name);
+  const candidates = [
+    hs && len(hs) <= 60 ? '營業時間：' + hs + '。' : '',
+    firstSentence(content.intro, 50),
+    menu.length ? '菜單有' + menu.join('、') + '等。' : '',
+    '網站提供地址、電話' + (content.booking.url ? '與線上訂位' : '') + '等來店資訊。'
+  ];
+  const fillers = ['歡迎來店坐坐，查看完整營業時間與交通資訊。', '想了解更多，歡迎直接來電或到店詢問。', '網站上整理了地址、電話與營業時間，方便你規劃行程。', '來訪前建議先確認營業時間，讓你的行程更順利。'];
+  let out = parts.join('');
+  for (const c of candidates) {
+    if (c && len(out) + len(c) <= MAX_DESC) out += c;
+  }
+  for (const f of fillers) {
+    if (len(out) >= MIN_DESC) break;
+    if (len(out) + len(f) <= MAX_DESC) out += f;
+  }
+  if (len(out) > MAX_DESC) out = clip(out, MAX_DESC - 1) + '…';
+  return out;
+}
+
+export function absUrl(siteUrl, rel) {
+  return siteUrl.replace(/\/?$/, '/') + String(rel).replace(/^\//, '');
+}
+
+export function buildBusinessLd(model) {
+  const { content: c, tpl, siteUrl, images } = model;
+  const a = parseAddress(c.address);
+  const ld = {
+    '@context': 'https://schema.org',
+    '@type': tpl.schemaType,
+    '@id': siteUrl + '#business',
+    name: c.name,
+    url: siteUrl,
+    description: model.description
+  };
+  if (images.length) ld.image = images.map((f) => absUrl(siteUrl, f));
+  if (c.phone) ld.telephone = c.phone;
+  ld.address = {
+    '@type': 'PostalAddress',
+    streetAddress: a.street || c.address,
+    addressCountry: 'TW'
+  };
+  if (a.district) ld.address.addressLocality = a.district;
+  if (a.city) ld.address.addressRegion = a.city;
+  if (a.postal) ld.address.postalCode = a.postal;
+  const spec = openingHoursSpec(c.hours);
+  if (spec.length) ld.openingHoursSpecification = spec;
+  const same = [c.social.instagram, c.social.facebook, c.social.line].filter(Boolean);
+  if (same.length) ld.sameAs = same;
+  if (c.booking.url) ld.potentialAction = { '@type': 'ReserveAction', name: c.booking.label || '線上訂位', target: c.booking.url };
+  return ld;
+}
+
+export function buildFaqLd(model) {
+  const faq = liveFaq(model.content);
+  if (!faq.length || !model.show.faq) return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }))
+  };
+}
+
+const FAVICON = (color) => 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="' + color + '"/><path d="M18 24h24v14a10 10 0 0 1-10 10h-4a10 10 0 0 1-10-10zM42 27h4a5 5 0 0 1 0 10h-4" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>');
+
+// <head> 內容。preview 不輸出 canonical / OG / JSON-LD 以外的追蹤，但仍輸出 meta 讓預覽盡量接近成品。
+export function buildHead(model) {
+  const { content: c, tpl, siteUrl, colors } = model;
+  const title = model.title, desc = model.description;
+  const hero = model.heroFile ? absUrl(siteUrl, model.heroFile) : '';
+  const lds = [buildBusinessLd(model), buildFaqLd(model)].filter(Boolean);
+  const h = [];
+  h.push('<meta charset="utf-8">');
+  h.push('<meta name="viewport" content="width=device-width, initial-scale=1">');
+  h.push('<title>' + esc(title) + '</title>');
+  h.push('<meta name="description" content="' + esc(desc) + '">');
+  h.push('<meta name="robots" content="index, follow, max-image-preview:large">');
+  h.push('<link rel="canonical" href="' + esc(siteUrl) + '">');
+  h.push('<meta name="theme-color" content="' + esc(colors.bg) + '">');
+  h.push('<link rel="icon" href="' + FAVICON(colors.accent) + '">');
+  h.push('<meta property="og:type" content="website">');
+  h.push('<meta property="og:site_name" content="' + esc(c.name) + '">');
+  h.push('<meta property="og:title" content="' + esc(title) + '">');
+  h.push('<meta property="og:description" content="' + esc(desc) + '">');
+  h.push('<meta property="og:url" content="' + esc(siteUrl) + '">');
+  h.push('<meta property="og:locale" content="zh_TW">');
+  if (hero) h.push('<meta property="og:image" content="' + esc(hero) + '">');
+  h.push('<meta name="twitter:card" content="' + (hero ? 'summary_large_image' : 'summary') + '">');
+  h.push('<meta name="twitter:title" content="' + esc(title) + '">');
+  h.push('<meta name="twitter:description" content="' + esc(desc) + '">');
+  if (hero) h.push('<meta name="twitter:image" content="' + esc(hero) + '">');
+  lds.forEach((ld) => h.push('<script type="application/ld+json">' + jsonForScript(ld) + '</script>'));
+  return h.join('\n');
+}
+
+export function robotsTxt(siteUrl) {
+  return [
+    'User-agent: *', 'Allow: /', '',
+    'User-agent: OAI-SearchBot', 'Allow: /', '',
+    'User-agent: GPTBot', 'Allow: /', '',
+    'User-agent: PerplexityBot', 'Allow: /', '',
+    'User-agent: ClaudeBot', 'Allow: /', '',
+    'User-agent: Google-Extended', 'Allow: /', '',
+    'Sitemap: ' + absUrl(siteUrl, 'sitemap.xml'), ''
+  ].join('\n');
+}
+
+export function sitemapXml(siteUrl, lastmod) {
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>' + esc(siteUrl) + '</loc><lastmod>' + esc(lastmod) + '</lastmod></url>\n</urlset>\n';
+}
+
+export function llmsTxt(model) {
+  const { content: c, siteUrl, tpl } = model;
+  const L = ['# ' + c.name, '', '> ' + model.description, '', '## 基本資料', '',
+    '- 類型：' + tpl.kindLabel, '- 地址：' + c.address];
+  if (c.phone) L.push('- 電話：' + c.phone);
+  const hs = hoursSummary(c.hours);
+  if (hs) L.push('- 營業時間：' + hs);
+  L.push('- 網站：' + siteUrl);
+  if (c.booking.url) L.push('- ' + (c.booking.label || '線上訂位') + '：' + c.booking.url);
+  const menu = liveMenu(c);
+  if (menu.length && model.show.menu) {
+    L.push('', '## 菜單', '');
+    menu.forEach((m) => L.push('- ' + m.name + (m.price != null ? '：NT$ ' + m.price : '')));
+  }
+  L.push('');
+  return L.join('\n');
+}
