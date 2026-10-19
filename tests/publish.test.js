@@ -8,9 +8,9 @@ const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', 
 const UID = 'aaaaaaaa-0000-0000-0000-000000000001', SID = '11111111-1111-1111-1111-111111111111';
 const ORIGIN = 'https://chi1017.github.io';
 
-function setup({ status = 'draft', content = sample.content, consented = true, events = [], owner = UID, dispatchOk = true, mailOk = true } = {}) {
+function setup({ status = 'draft', content = sample.content, consented = true, terms = '2026-10-01T00:00:00Z', events = [], owner = UID, dispatchOk = true, mailOk = true } = {}) {
   const log = { patches: [], events: [], versions: [], mails: [], dispatches: [] };
-  const site = { id: SID, member_id: owner, slug: 'wuhou-cafe', status, content, palette: 'ink', sections: sample.sections };
+  const site = { id: SID, member_id: owner, slug: 'wuhou-cafe', status, content, palette: 'ink', sections: sample.sections, terms_accepted_at: terms };
   const eq = (q, k) => (q.match(new RegExp('(?:^|&)' + k + '=eq\\.([^&]+)')) || [])[1];
   const db = {
     getOne: async (t, q) => {
@@ -106,4 +106,10 @@ test('publishes the DB draft, never client-supplied content', async () => {
 test('email template escapes shop name', () => {
   const m = adminFirstPublish({ shopName: '<script>x</script>', slug: 'a', previewUrl: 'https://x/?a=1&b=2', memberEmail: 'm@e.com' });
   assert.ok(!m.html.includes('<script>')); assert.ok(m.html.includes('&amp;b=2'));
+});
+
+test('first publish requires accepted terms (draft only); pending/live are not blocked', async () => {
+  const s = setup({ terms: null }); const r = await s.call(); const j = await r.json();
+  assert.equal(r.status, 403); assert.equal(j.error, 'terms_required'); assert.equal(s.log.versions.length, 0); assert.equal(s.log.mails.length, 0);
+  for (const status of ['pending', 'live', 'overdue']) assert.equal((await setup({ status, terms: null }).call()).status, 200, status);
 });
