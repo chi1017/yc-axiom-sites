@@ -1,6 +1,6 @@
 // 內容 JSON 的上限、預設值與正規化。編輯器、Edge Function、建置腳本共用同一份。
 import { safeHttpsUrl, cleanPhone, clip } from './escape.js';
-import { PALETTE_IDS } from './palettes.js';
+import { isValidPaletteId } from './palettes.js';
 
 export const LIMITS = {
   name: 40, tagline: 60, intro: 600, address: 120, phone: 24, hoursNote: 80,
@@ -108,7 +108,7 @@ export function normalizeContent(raw) {
   return c;
 }
 
-export function normalizePalette(p) { return PALETTE_IDS.includes(p) ? p : 'forest'; }
+export function normalizePalette(p) { return isValidPaletteId(p) ? p : 'forest'; }
 export function normalizeSections(s) {
   const o = defaultSections();
   const r = s && typeof s === 'object' ? s : {};

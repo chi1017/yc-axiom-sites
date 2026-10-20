@@ -97,3 +97,9 @@ test('deterministic output', () => {
   const a = live({ lastmod: '2026-10-01' }).files, b = live({ lastmod: '2026-10-01' }).files;
   assert.deepEqual(a, b);
 });
+test('custom palette renders with derived variables', async () => {
+  const { derivePalette } = await import('../templates/shared/palettes.js');
+  const d = derivePalette('#1F6F5C', false);
+  const { html } = live({ palette: 'c-1f6f5c-l' });
+  assert.ok(html.includes('--bg:' + d.bg) && html.includes('--accent:' + d.accent));
+});
