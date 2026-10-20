@@ -6,11 +6,12 @@ import { normalizeContent, normalizePalette, normalizeSections } from '../templa
 import { validateForPublish } from '../templates/shared/validate.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './lib/images.mjs';
 import { buildMaintenancePage } from '../templates/shared/maintenance.js';
+import { buildClosedPage } from '../templates/shared/closed.js';
 import { customerGoLive } from '../supabase/functions/_shared/emails.mjs';
 
 const BUCKET = 'site-photos';
 const DEPLOYABLE = ['live', 'overdue'];   // 一般建置只允許這兩種；維護模式只允許 suspended
-const MODES = ['normal', 'maintenance'];
+const MODES = ['normal', 'maintenance', 'closed'];
 
 export const HEADERS_FILE = `/*
   X-Content-Type-Options: nosniff
@@ -19,7 +20,7 @@ export const HEADERS_FILE = `/*
   Cache-Control: public, max-age=3600
 `;
 
-// mode: 'normal'（部署客戶網站）｜'maintenance'（部署「維護中」頁，僅限 suspended）
+// mode: 'normal'（部署客戶網站）｜'maintenance'（部署「維護中」頁，僅限 suspended）｜'closed'（部署「已停止服務」頁，僅限 cancelled）
 // sendMail?: ({to,subject,html,text}) → {ok,error?}  部署成功後寄「網站已上線」信；失敗只記錄，絕不影響部署結果
 export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db, cf, deploy, sendMail, log = console.log, now = () => new Date() }) {
   const t0 = Date.now();
@@ -28,6 +29,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     if (!MODES.includes(mode)) throw new Error('不支援的建置模式：' + mode);
     const site = await db.getOne('rental_sites', 'id=eq.' + encodeURIComponent(siteId) + '&select=*');
     if (!site) throw new Error('找不到網站 ' + siteId);
+    if (mode === 'closed') return await runClosed({ site, outDir, db, cf, deploy, event, log, t0, now });
     if (mode === 'maintenance') return await runMaintenance({ site, outDir, db, cf, deploy, event, log, t0, now });
     if (!DEPLOYABLE.includes(site.status)) throw new Error('網站狀態是 ' + site.status + '，不會部署（只有 live／overdue 會部署）');
     const vid = versionId || site.live_version_id;
@@ -73,7 +75,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     return { ok: true, url: siteUrl };
   } catch (e) {
     const msg = String(e && e.message ? e.message : e).replace(/(Bearer\s+)[\w.\-]+/gi, '$1***').slice(0, 500);
-    await event('deploy_failed', { message: msg, version_id: versionId || null, ...(mode === 'maintenance' ? { mode } : {}) });
+    await event('deploy_failed', { message: msg, version_id: versionId || null, ...(mode !== 'normal' ? { mode } : {}) });
     log('部署失敗：' + msg);
     return { ok: false, error: msg };
   }
@@ -119,4 +121,26 @@ async function runMaintenance({ site, outDir, db, cf, deploy, event, log, t0, no
   await event('deploy_ok', { mode: 'maintenance', url: site.public_url || null, seconds: Math.round((Date.now() - t0) / 1000) });
   log('維護頁已部署：' + project.name);
   return { ok: true, maintenance: true };
+}
+
+// 終止模式：把「網站已停止服務」頁部署到同一個專案（網址不變）。不動 live_version_id，復原租用時才能回到原版本。
+async function runClosed({ site, outDir, db, cf, deploy, event, log, t0, now }) {
+  if (site.status !== 'cancelled') throw new Error('網站狀態是 ' + site.status + '，停止服務頁只會部署在 cancelled 的網站');
+  if (!site.cf_project_name) {
+    await event('deploy_ok', { mode: 'closed', skipped: '尚未部署過，沒有需要換成停止服務頁的網站' });
+    log('尚未部署過，略過停止服務頁');
+    return { ok: true, skipped: true };
+  }
+  const project = await cf.ensureProject(site.cf_project_name);
+  const shopName = (site.content && site.content.name) || '';
+  const page = buildClosedPage({ shopName });
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+  for (const [f, c] of Object.entries(page.files)) writeFileSync(join(outDir, f), c);
+  writeFileSync(join(outDir, '_headers'), HEADERS_FILE + '/*\n  X-Robots-Tag: noindex, nofollow\n');
+  await deploy({ dir: outDir, project: project.name });
+  await db.patch('rental_sites', 'id=eq.' + encodeURIComponent(site.id), { last_published_at: now().toISOString() });
+  await event('deploy_ok', { mode: 'closed', url: site.public_url || null, seconds: Math.round((Date.now() - t0) / 1000) });
+  log('停止服務頁已部署：' + project.name);
+  return { ok: true, closed: true };
 }
