@@ -12,13 +12,14 @@ on:
         required: false
         type: string
       mode:
-        description: normal（部署客戶網站）或 maintenance（部署維護頁，僅限 suspended 的網站）
+        description: normal（部署客戶網站）、maintenance（部署維護頁，僅限 suspended 的網站）或 closed（部署停止服務頁，僅限 cancelled 的網站）
         required: false
         default: normal
         type: choice
         options:
           - normal
           - maintenance
+          - closed
 
 # 同一個網站同時只跑一個；後來的排隊，不取消正在跑的
 concurrency:
