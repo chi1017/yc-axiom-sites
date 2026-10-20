@@ -20,7 +20,7 @@ test('live build: structure, one h1, headings do not skip', () => {
   assert.ok(d.querySelectorAll('h2').length >= 5);
   assert.equal(d.querySelectorAll('script:not([type="application/ld+json"])').length, 0, 'no client-side JS');
   assert.equal(d.querySelector('link[rel=canonical]').getAttribute('href'), URL_);
-  assert.ok(html.includes('網站設計：<a href="https://chi1017.github.io/yc-axiom-site/"'));
+  assert.ok(!html.includes('網站設計') && !html.includes('YC AXIOM') && !html.includes('yc-axiom-site'), 'no designer credit in customer site');
 });
 test('live build: images have alt, local paths, hero eager and rest lazy', () => {
   const { document: d } = parseHTML(live().html);
