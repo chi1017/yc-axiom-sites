@@ -11,7 +11,7 @@ const ORIGIN = 'https://chi1017.github.io';
 const NOW = new Date('2026-10-10T20:00:00Z');   // 台灣時間 2026-10-11 04:00 → today = 2026-10-11
 
 function setup({ site = {}, user = { id: 'u1', email: 'ycaxiom@gmail.com', isAdmin: true }, dispatchOk = true, mailOk = true, cf = undefined, versions = [{ id: V2, created_at: '2026-10-09' }], payments = [], memberEmail = 'cust@example.com' } = {}) {
-  const s = { id: SID, member_id: 'mmm', slug: 'wuhou-cafe', status: 'live', content: { name: '午後日光咖啡' }, palette: 'ink', sections: {}, paid_until: '2026-10-20', live_version_id: VID, cf_project_name: 'wuhou-cafe', custom_domain: null, domain_status: 'none', ...site };
+  const s = { id: SID, member_id: 'mmm', slug: 'wuhou-cafe', status: 'live', content: { name: '午後日光咖啡' }, palette: 'ink', sections: {}, paid_until: '2026-10-20', live_version_id: VID, cf_project_name: 'wuhou-cafe', custom_domain: null, domain_status: 'none', plan: 'standard', early_bird: false, ...site };
   const log = { patches: [], events: [], payments: [], mails: [], dispatches: [] };
   const db = {
     getOne: async (t, q) => {
@@ -22,6 +22,7 @@ function setup({ site = {}, user = { id: 'u1', email: 'ycaxiom@gmail.com', isAdm
     },
     list: async (t, q) => {
       if (t === 'payments') return payments;
+      if (t === 'rental_sites') return log.earlyBirdOthers || [];
       if (t === 'site_versions') return versions;
       return [];
     },
@@ -224,4 +225,33 @@ test('brevo sender: fixed sender + reply-to, never throws, reports failures', as
   assert.equal((await makeBrevoSender({ apiKey: '' })({ to: 'a@b.c' })).ok, false);
   assert.equal((await makeBrevoSender({ apiKey: 'K', fetchImpl: async () => { throw new Error('net'); } })({ to: 'a@b.c' })).ok, false);
   assert.equal((await makeBrevoSender({ apiKey: 'K', fetchImpl: async () => ({ ok: false, status: 401, text: async () => 'bad key' }) })({ to: 'a@b.c' })).error.includes('401'), true);
+});
+
+test('set_plan: admin sets plan, event logged, no deploy; same plan is a no-op; validation', async () => {
+  let s = setup({ site: { plan: 'self' } });
+  let r = await s.call('set_plan', { plan: 'pro' });
+  assert.equal(r.status, 200); assert.equal(s.site.plan, 'pro'); assert.equal(s.site.early_bird, false);
+  assert.deepEqual(types(s.log), ['plan_set']); assert.equal(s.log.events[0].detail.plan_from, 'self'); assert.equal(s.log.dispatches.length, 0);
+  r = await s.call('set_plan', { plan: 'pro' }); assert.equal(r.status, 200); assert.equal(s.log.events.length, 1);
+  for (const bad of [{}, { plan: 'gold' }, { plan: 'pro', early_bird: 'yes' }, { plan: 'pro', early_bird: true }]) { s = setup(); assert.equal((await s.call('set_plan', bad)).status, 400, JSON.stringify(bad)); assert.equal(s.log.patches.length, 0); }
+  s = setup({ site: { status: 'cancelled' } }); assert.equal((await s.call('set_plan', { plan: 'pro' })).status, 409);
+  s = setup({ site: { status: 'draft' } }); assert.equal((await s.call('set_plan', { plan: 'standard' })).status, 200);
+});
+test('set_plan: early bird only for standard, capped at 10 other sites, can be removed', async () => {
+  let s = setup({ site: { plan: 'self' } });
+  let r = await s.call('set_plan', { plan: 'standard', early_bird: true });
+  assert.equal(r.status, 200); assert.equal(s.site.early_bird, true); assert.equal(s.site.plan, 'standard');
+  r = await s.call('set_plan', { plan: 'standard', early_bird: false }); assert.equal(s.site.early_bird, false);
+  s = setup(); s.log.earlyBirdOthers = Array.from({ length: 10 }, (_, i) => ({ id: 'x' + i }));
+  r = await s.call('set_plan', { plan: 'standard', early_bird: true }); assert.equal(r.status, 409); assert.equal((await r.json()).error, 'early_bird_full'); assert.equal(s.log.patches.length, 0);
+  s = setup(); s.log.earlyBirdOthers = Array.from({ length: 9 }, (_, i) => ({ id: 'x' + i }));
+  assert.equal((await s.call('set_plan', { plan: 'standard', early_bird: true })).status, 200);
+  s = setup({ site: { plan: 'standard', early_bird: true } }); s.log.earlyBirdOthers = Array.from({ length: 10 }, (_, i) => ({ id: 'x' + i }));
+  assert.equal((await s.call('set_plan', { plan: 'standard', early_bird: true })).status, 200, 'already holding a slot is not re-counted');
+});
+test('set_domain: self plan has no custom domain; standard/pro do', async () => {
+  const cf = { addDomain: async () => ({ status: 'pending', cname_target: 'x.pages.dev' }), getDomain: async () => null, removeDomain: async () => {} };
+  let s = setup({ site: { plan: 'self' }, cf }); const r = await s.call('set_domain', { domain: 'www.example.com' });
+  assert.equal(r.status, 409); assert.equal((await r.json()).error, 'plan_required'); assert.equal(s.log.patches.length, 0);
+  s = setup({ site: { plan: 'pro' }, cf }); assert.equal((await s.call('set_domain', { domain: 'www.example.com' })).status, 200);
 });
