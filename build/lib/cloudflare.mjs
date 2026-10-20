@@ -36,6 +36,13 @@ export function makeCloudflare({ token, accountId, fetchImpl = fetch }) {
       if (r.status >= 300) throw new Error('Cloudflare 移除網域失敗 (' + r.status + ')：' + errText(r.json));
       return { removed: true };
     },
+    // 刪除整個 Pages 專案（連同所有部署）。找不到視為已刪除（讓「永久刪除」可以安全重試）
+    async deleteProject(project) {
+      const r = await call(api + '/' + encodeURIComponent(project), { method: 'DELETE' });
+      if (r.status === 404) return { deleted: false };
+      if (r.status >= 300) throw new Error('Cloudflare 刪除專案失敗 (' + r.status + ')：' + errText(r.json));
+      return { deleted: true };
+    },
     // 查詢網域狀態：Cloudflare 的 status 為 initializing／pending／active／deactivated／blocked／error
     async getDomain(project, domain) {
       const got = await call(api + '/' + encodeURIComponent(project) + '/domains/' + encodeURIComponent(domain), { method: 'GET' });
