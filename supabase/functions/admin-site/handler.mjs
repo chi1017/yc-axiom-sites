@@ -1,4 +1,4 @@
-// 管理員操作租用網站的 Edge Function 邏輯（確認收款、重新發佈、暫停／恢復、還原版本、網域）。
+// 管理員操作租用網站的 Edge Function 邏輯（確認收款、重新發佈、暫停／恢復、終止租用、永久刪除、還原版本、網域）。
 // 所有外部依賴由 deps 注入，方便在 Node 內測試。只有 JWT app_metadata.role = admin 能呼叫；
 // 每個動作都會在 site_events 留下紀錄（含操作者 Email）。
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
@@ -7,7 +7,8 @@ export { parseOrigins };
 
 const MAX_MONTHS = 60;
 const MAX_AMOUNT = 10000000;
-const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'restore_version', 'set_domain', 'check_domain', 'clear_domain'];
+const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain'];
+const PHOTO_BUCKET = 'site-photos';
 
 // 台灣日期（UTC+8）。到期日、「今天」都以台灣時間計算。
 export function taipeiDate(d) { return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10); }
@@ -33,7 +34,7 @@ export function normalizeDomain(v) {
  *   db: { getOne, patch, insert, insertReturning, list },
  *   sendMail({to,subject,html,text}) → {ok,error?},
  *   dispatch({siteId,versionId?,mode?}) → {ok,error?},
- *   cf?: { addDomain, getDomain, removeDomain },
+ *   cf?: { addDomain, getDomain, removeDomain, deleteProject },
  *   now?: () => Date
  * }
  */
@@ -154,14 +155,57 @@ export async function handleAdmin(req, deps) {
     }
 
     case 'restore': {
-      if (site.status !== 'suspended') return fail('not_allowed', '只有暫停中的網站可以恢復', 409);
+      if (!['suspended', 'cancelled'].includes(site.status)) return fail('not_allowed', '只有暫停中或已終止的網站可以恢復', 409);
+      const statusFrom = site.status;
       const deployed = !!(site.live_version_id && site.cf_project_name);
       const status = !deployed ? 'pending' : (site.paid_until && site.paid_until >= today ? 'live' : 'overdue');
       await db.patch('rental_sites', 'id=eq.' + siteId, { status, suspended_at: null, suspend_reason: null });
-      await event('restored', { status_to: status });
+      await event('restored', { status_to: status, status_from: statusFrom });
       if (!deployed) return reply({ ok: true, status, message: '已恢復為「待上線」（這個網站還沒有部署過）。' }, 200);
       const d = await queueDeploy({ versionId: site.live_version_id });
       return reply({ ok: true, status, ...(d.ok ? {} : { warning: deployWarn }), message: d.ok ? '已恢復為「' + status + '」，網站約 1–2 分鐘後回來。' : '已恢復，但部署沒有啟動。' + deployWarn }, 200);
+    }
+
+    // 終止租用：網站改成「已終止」，網址換成「已停止服務」頁；資料（草稿、版本、照片、收款紀錄）全部保留，可以再按「恢復」。
+    case 'terminate': {
+      const reason = body.reason == null ? '' : String(body.reason).trim();
+      if (reason.length > 200) return fail('bad_request', '原因最長 200 字');
+      if (!['pending', 'live', 'overdue', 'suspended'].includes(site.status)) return fail('not_allowed', site.status === 'cancelled' ? '這個網站已經是終止狀態' : '這個狀態的網站不能終止', 409);
+      const statusFrom = site.status;
+      await db.patch('rental_sites', 'id=eq.' + siteId, { status: 'cancelled', suspended_at: null, suspend_reason: null });
+      await event('terminated', { reason, status_from: statusFrom });
+      if (!site.cf_project_name) return reply({ ok: true, status: 'cancelled', message: '已終止（這個網站還沒有部署過，沒有網址需要下線）。' }, 200);
+      const d = await queueDeploy({ mode: 'closed' });
+      return reply({ ok: true, status: 'cancelled', ...(d.ok ? {} : { warning: deployWarn }), message: d.ok ? '已終止，「已停止服務」頁約 1–2 分鐘後生效。資料都還保留。' : '已終止，但停止服務頁沒有啟動部署。' + deployWarn }, 200);
+    }
+
+    // 永久刪除：只有「已終止」的網站可以；必須輸入網址代稱確認。刪 Cloudflare 專案 → 刪照片 → 刪資料庫紀錄（草稿、版本、事件、收款、月報一併刪除）。
+    // 順序是「先刪外部、最後才刪資料庫」，每一步都能安全重試；任何一步失敗就停下來，網站仍保持「已終止」。
+    case 'purge': {
+      if (site.status !== 'cancelled') return fail('not_allowed', '只有「已終止」的網站可以永久刪除，請先終止租用', 409);
+      if (typeof body.confirm_slug !== 'string' || body.confirm_slug.trim() !== site.slug) return fail('confirm_mismatch', '請輸入這個網站的網址代稱「' + site.slug + '」來確認');
+      const steps = [];
+      if (site.cf_project_name) {
+        if (!deps.cf || !deps.cf.deleteProject) return fail('cf_not_configured', '尚未設定 Cloudflare 金鑰，無法刪除網站專案，所以什麼都沒刪', 501);
+        if (site.custom_domain) await deps.cf.removeDomain(site.cf_project_name, site.custom_domain).catch(() => {});
+        try { const r = await deps.cf.deleteProject(site.cf_project_name); steps.push(r.deleted ? '已刪除 Cloudflare 網站專案' : 'Cloudflare 專案已經不存在'); }
+        catch (e) { return fail('cloudflare_error', '刪除 Cloudflare 專案失敗，所以什麼都沒刪：' + String(e.message || e).slice(0, 200) + '。可以到 Cloudflare 後台手動刪除該專案後再按一次。', 502); }
+      }
+      let photos = 0;
+      try {
+        for (let guard = 0; guard < 50; guard++) {
+          const objs = (await db.storageList(PHOTO_BUCKET, siteId, { offset: 0, limit: 100 })).filter((o) => o && o.id != null && o.name);
+          if (!objs.length) break;
+          await db.storageRemove(PHOTO_BUCKET, objs.map((o) => siteId + '/' + o.name));
+          photos += objs.length;
+        }
+      } catch (e) { return fail('storage_error', '網站專案已刪除，但照片沒有刪成功：' + String(e.message || e).slice(0, 200) + '。請再按一次永久刪除。', 502); }
+      steps.push('已刪除 ' + photos + ' 張照片');
+      try { await db.remove('rental_sites', 'id=eq.' + siteId); }
+      catch (e) { return fail('db_error', '外部資料已刪除，但資料庫紀錄沒有刪成功：' + String(e.message || e).slice(0, 200) + '。請再按一次永久刪除。', 502); }
+      steps.push('已刪除資料庫紀錄');
+      console.log('[admin-site] purged site ' + siteId + ' slug=' + site.slug + ' by ' + by + '；' + steps.join('；'));
+      return reply({ ok: true, deleted: true, message: '已永久刪除：' + steps.join('、') + '。' }, 200);
     }
 
     case 'restore_version': {
