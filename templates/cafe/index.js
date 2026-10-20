@@ -2,7 +2,6 @@ import { esc, paragraphs, safeHttpsUrl, telHref } from '../shared/escape.js';
 import { buildHead } from '../shared/seo.js';
 import { liveMenu, liveFaq, liveNews } from '../shared/content.js';
 import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
-import { YC_SITE_URL, YC_SITE_NAME } from '../shared/config.js';
 import { cafeCss } from './styles.js';
 
 const PH_NAME = '店名', PH_TAG = '一句話介紹你的店', PH_ADDR = '店家地址', PH_PHONE = '電話';
@@ -122,8 +121,7 @@ function render(m) {
     (visitText.length ? '<div style="margin-top:24px">' + visitText.map((p) => '<p>' + p + '</p>').join('') + '</div>' : '') +
     '</div></section>';
 
-  const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : ph(PH_NAME)) + '</span>' +
-    '<span>網站設計：<a href="' + esc(YC_SITE_URL) + '" target="_blank" rel="noopener">' + esc(YC_SITE_NAME) + '</a></span></div></footer>';
+  const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : ph(PH_NAME)) + '</span></div></footer>';
 
   return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + cafeCss(colors) + '</style>\n</head>\n<body>\n' +
     '<a class="skip" href="#main">跳到主要內容</a>\n' +
