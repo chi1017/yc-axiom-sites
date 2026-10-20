@@ -3,11 +3,12 @@
 // 每個動作都會在 site_events 留下紀錄（含操作者 Email）。
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
 import { customerReceipt } from '../_shared/emails.mjs';
+import { PLANS, EARLY_BIRD, isPlanId } from '../../../templates/shared/plans.js';
 export { parseOrigins };
 
 const MAX_MONTHS = 60;
 const MAX_AMOUNT = 10000000;
-const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'restore_version', 'set_domain', 'check_domain', 'clear_domain'];
+const ACTIONS = ['confirm_payment', 'set_plan', 'republish', 'suspend', 'restore', 'restore_version', 'set_domain', 'check_domain', 'clear_domain'];
 
 // 台灣日期（UTC+8）。到期日、「今天」都以台灣時間計算。
 export function taipeiDate(d) { return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10); }
@@ -130,6 +131,23 @@ export async function handleAdmin(req, deps) {
       return reply({ ok: true, status: patch.status || site.status, paid_until: to, deploying: needDeploy && !warning, ...(warning ? { warning } : {}), message: '已記錄收款，到期日 ' + to + (needDeploy && !warning ? '，正在部署（約 1–2 分鐘）。' : '。') + (warning ? ' ' + warning : '') }, 200);
     }
 
+    case 'set_plan': {
+      if (!isPlanId(body.plan)) return fail('bad_request', '方案必須是 self、standard 或 pro');
+      if (body.early_bird != null && typeof body.early_bird !== 'boolean') return fail('bad_request', '早鳥欄位必須是 true 或 false');
+      if (site.status === 'cancelled') return fail('not_allowed', '這個網站已終止服務', 409);
+      const early = body.early_bird === true;
+      if (early && body.plan !== EARLY_BIRD.plan) return fail('bad_request', '早鳥價只適用於' + PLANS[EARLY_BIRD.plan].name, 400);
+      if (early && !site.early_bird) {
+        const used = await db.list('rental_sites', 'early_bird=eq.true&id=neq.' + siteId + '&select=id');
+        if (used.length >= EARLY_BIRD.slots) return fail('early_bird_full', '早鳥名額 ' + EARLY_BIRD.slots + ' 位已滿', 409);
+      }
+      if (site.plan === body.plan && !!site.early_bird === early) return reply({ ok: true, plan: body.plan, early_bird: early, message: '方案沒有變動。' }, 200);
+      const planFrom = site.plan || 'self', earlyFrom = !!site.early_bird;
+      await db.patch('rental_sites', 'id=eq.' + siteId, { plan: body.plan, early_bird: early });
+      await event('plan_set', { plan: body.plan, early_bird: early, plan_from: planFrom, early_bird_from: earlyFrom });
+      return reply({ ok: true, plan: body.plan, early_bird: early, message: '已設定為' + PLANS[body.plan].name + (early ? '（早鳥）' : '') + '。' }, 200);
+    }
+
     case 'republish': {
       if (site.status === 'suspended') {
         const d = await queueDeploy({ mode: 'maintenance' });
@@ -180,6 +198,7 @@ export async function handleAdmin(req, deps) {
       if (!deps.cf) return fail('cf_not_configured', '尚未設定 Cloudflare 金鑰（Supabase Secrets：CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID）', 501);
       const domain = normalizeDomain(body.domain);
       if (!domain) return fail('bad_request', '網域格式不正確（例如 www.example.com；不接受 pages.dev）');
+      if (!PLANS[isPlanId(site.plan) ? site.plan : 'self'].domain) return fail('plan_required', PLANS.self.name + '不含自訂網域，請先把方案改成標準版或進階版', 409);
       if (!site.cf_project_name) return fail('not_deployed', '網站還沒有部署過，請先確認收款上線後再綁網域', 409);
       if (['draft', 'cancelled'].includes(site.status)) return fail('not_allowed', '這個狀態的網站不能綁網域', 409);
       const used = await db.getOne('rental_sites', 'custom_domain=eq.' + encodeURIComponent(domain) + '&id=neq.' + siteId + '&select=id');
