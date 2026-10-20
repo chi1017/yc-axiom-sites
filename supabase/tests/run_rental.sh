@@ -10,4 +10,6 @@ $P -v ON_ERROR_STOP=1 -f migrations/005_rental.sql >/dev/null && echo "[005 OK #
 $P -v ON_ERROR_STOP=1 -f migrations/005_rental.sql >/dev/null && echo "[005 OK #2 (idempotent)]"
 $P -v ON_ERROR_STOP=1 -f migrations/006_rental_admin.sql >/dev/null && echo "[006 OK #1]"
 $P -v ON_ERROR_STOP=1 -f migrations/006_rental_admin.sql >/dev/null && echo "[006 OK #2 (idempotent)]"
-if [ "$1" = "30" ]; then $P -f tests/30_rental_tests.sql 2>&1; else $P -f tests/31_admin_tests.sql 2>&1; fi
+$P -v ON_ERROR_STOP=1 -f migrations/007_rental_cron.sql >/dev/null && echo "[007 OK #1]"
+$P -v ON_ERROR_STOP=1 -f migrations/007_rental_cron.sql >/dev/null && echo "[007 OK #2 (idempotent)]"
+if [ "$1" = "30" ]; then $P -f tests/30_rental_tests.sql 2>&1; elif [ "$1" = "32" ]; then $P -f tests/32_cron_tests.sql 2>&1; else $P -f tests/31_admin_tests.sql 2>&1; fi

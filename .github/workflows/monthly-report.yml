@@ -1,0 +1,93 @@
+name: Monthly report and photo cleanup
+
+# 每月 1 日台灣時間 10:00（UTC 02:00）自動執行；也可以在 Actions 頁面手動執行。
+# 注意：公開 repo 若 60 天沒有任何活動，GitHub 會自動停用排程；到 Actions 頁面按「Enable workflow」即可恢復。
+on:
+  schedule:
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      site_id:
+        description: 只跑單一網站（rental_sites.id，留空 = 全部上線中的網站）
+        required: false
+        type: string
+      month:
+        description: 月份（YYYY-MM-01，留空 = 本月）
+        required: false
+        type: string
+      dry_run:
+        description: 試跑：只檢測、不寫入資料庫、不寄信
+        required: false
+        default: false
+        type: boolean
+      send_emails:
+        description: 寄月報給客戶
+        required: false
+        default: true
+        type: boolean
+      cleanup:
+        description: 舊照片清理（none 不做｜dry-run 只列清單｜apply 真的刪除沒被引用的檔案）
+        required: false
+        default: dry-run
+        type: choice
+        options:
+          - none
+          - dry-run
+          - apply
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: chi1017/yc-axiom-site
+          ref: main
+          path: official
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund playwright@1.56.0
+      - run: npx playwright install --with-deps chromium
+      - name: Run monthly report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          SEO_TOOL: ${{ github.workspace }}/official/seo-tool.html
+          GEO_ENGINE: ${{ github.workspace }}/official/assets/geo-engine.js
+          SITE_ID: ${{ inputs.site_id }}
+          REPORT_MONTH: ${{ inputs.month }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SEND_EMAILS: ${{ inputs.send_emails }}
+        run: |
+          ARGS=()
+          if [ -n "$SITE_ID" ]; then ARGS+=(--site-id "$SITE_ID"); fi
+          if [ -n "$REPORT_MONTH" ]; then ARGS+=(--month "$REPORT_MONTH"); fi
+          if [ "$DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+          if [ "$SEND_EMAILS" = "false" ]; then ARGS+=(--no-email); fi
+          node build/monthly-report.mjs "${ARGS[@]}"
+
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Clean up unreferenced photos
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CLEANUP_MODE: ${{ inputs.cleanup || 'apply' }}
+        run: |
+          if [ "$CLEANUP_MODE" = "none" ]; then echo "略過照片清理"; exit 0; fi
+          if [ "$CLEANUP_MODE" = "apply" ]; then node build/cleanup-photos.mjs --apply; else node build/cleanup-photos.mjs; fi
