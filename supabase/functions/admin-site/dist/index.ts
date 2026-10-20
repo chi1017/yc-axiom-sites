@@ -32,10 +32,50 @@ function customerReceipt({ shopName, amount, months, paidOn, periodTo, reference
   return { subject, html, text };
 }
 
+// templates/shared/plans.js
+var PLAN_IDS = ["self", "standard", "pro"];
+var PLANS = {
+  self: {
+    id: "self",
+    name: "自助版",
+    monthly: 690,
+    setup: 0,
+    edits: 0,
+    domain: false,
+    recommended: false,
+    summary: "自己在線上編輯器填內容，按發佈就上線",
+    features: ["自己填內容、隨時修改、換照片", "12 款配色可選，也可自選主色", "SEO／GEO 已內建，每月寄送檢測報告", "免費網址：店名.pages.dev"]
+  },
+  standard: {
+    id: "standard",
+    name: "標準版",
+    monthly: 990,
+    setup: 3e3,
+    edits: 2,
+    domain: true,
+    recommended: true,
+    summary: "YC 幫你把內容填好、上線",
+    features: ["包含自助版所有功能", "YC 幫你把內容填好、上線", "每月 2 次由 YC 代為修改內容", "可綁定自己的網域"]
+  },
+  pro: {
+    id: "pro",
+    name: "進階版",
+    monthly: 1990,
+    setup: 3e3,
+    edits: 5,
+    domain: true,
+    recommended: false,
+    summary: "更多代改，並保障同區域同業種不撞版",
+    features: ["包含標準版所有功能", "每月 5 次由 YC 代為修改內容", "每月檢測報告由 YC 人工解讀並提供改善建議", "同區域同業種不撞版：同一個版型在你的區域只租給你一家"]
+  }
+};
+var EARLY_BIRD = { plan: "standard", monthly: 690, slots: 10 };
+var isPlanId = (p) => typeof p === "string" && PLAN_IDS.includes(p);
+
 // supabase/functions/admin-site/handler.mjs
 var MAX_MONTHS = 60;
 var MAX_AMOUNT = 1e7;
-var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "restore_version", "set_domain", "check_domain", "clear_domain"];
+var ACTIONS = ["confirm_payment", "set_plan", "republish", "suspend", "restore", "restore_version", "set_domain", "check_domain", "clear_domain"];
 function taipeiDate(d) {
   return new Date(d.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
 }
@@ -149,6 +189,22 @@ async function handleAdmin(req, deps) {
       }
       return reply({ ok: true, status: patch.status || site.status, paid_until: to, deploying: needDeploy && !warning, ...warning ? { warning } : {}, message: "已記錄收款，到期日 " + to + (needDeploy && !warning ? "，正在部署（約 1–2 分鐘）。" : "。") + (warning ? " " + warning : "") }, 200);
     }
+    case "set_plan": {
+      if (!isPlanId(body.plan)) return fail("bad_request", "方案必須是 self、standard 或 pro");
+      if (body.early_bird != null && typeof body.early_bird !== "boolean") return fail("bad_request", "早鳥欄位必須是 true 或 false");
+      if (site.status === "cancelled") return fail("not_allowed", "這個網站已終止服務", 409);
+      const early = body.early_bird === true;
+      if (early && body.plan !== EARLY_BIRD.plan) return fail("bad_request", "早鳥價只適用於" + PLANS[EARLY_BIRD.plan].name, 400);
+      if (early && !site.early_bird) {
+        const used = await db2.list("rental_sites", "early_bird=eq.true&id=neq." + siteId + "&select=id");
+        if (used.length >= EARLY_BIRD.slots) return fail("early_bird_full", "早鳥名額 " + EARLY_BIRD.slots + " 位已滿", 409);
+      }
+      if (site.plan === body.plan && !!site.early_bird === early) return reply({ ok: true, plan: body.plan, early_bird: early, message: "方案沒有變動。" }, 200);
+      const planFrom = site.plan || "self", earlyFrom = !!site.early_bird;
+      await db2.patch("rental_sites", "id=eq." + siteId, { plan: body.plan, early_bird: early });
+      await event("plan_set", { plan: body.plan, early_bird: early, plan_from: planFrom, early_bird_from: earlyFrom });
+      return reply({ ok: true, plan: body.plan, early_bird: early, message: "已設定為" + PLANS[body.plan].name + (early ? "（早鳥）" : "") + "。" }, 200);
+    }
     case "republish": {
       if (site.status === "suspended") {
         const d2 = await queueDeploy({ mode: "maintenance" });
@@ -195,6 +251,7 @@ async function handleAdmin(req, deps) {
       if (!deps.cf) return fail("cf_not_configured", "尚未設定 Cloudflare 金鑰（Supabase Secrets：CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID）", 501);
       const domain = normalizeDomain(body.domain);
       if (!domain) return fail("bad_request", "網域格式不正確（例如 www.example.com；不接受 pages.dev）");
+      if (!PLANS[isPlanId(site.plan) ? site.plan : "self"].domain) return fail("plan_required", PLANS.self.name + "不含自訂網域，請先把方案改成標準版或進階版", 409);
       if (!site.cf_project_name) return fail("not_deployed", "網站還沒有部署過，請先確認收款上線後再綁網域", 409);
       if (["draft", "cancelled"].includes(site.status)) return fail("not_allowed", "這個狀態的網站不能綁網域", 409);
       const used = await db2.getOne("rental_sites", "custom_domain=eq." + encodeURIComponent(domain) + "&id=neq." + siteId + "&select=id");
