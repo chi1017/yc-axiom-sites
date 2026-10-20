@@ -1,4 +1,4 @@
-// GitHub Actions 進入點：node build/build-site.mjs --site-id <uuid> [--version-id <uuid>] [--mode normal|maintenance] [--no-deploy]
+// GitHub Actions 進入點：node build/build-site.mjs --site-id <uuid> [--version-id <uuid>] [--mode normal|maintenance|closed] [--no-deploy]
 import { spawn } from 'node:child_process';
 import { makeSupabase } from './lib/supabase.mjs';
 import { makeCloudflare } from './lib/cloudflare.mjs';
@@ -13,7 +13,7 @@ const versionId = arg('version-id');
 if (versionId && !/^[0-9a-f-]{36}$/i.test(versionId)) { console.error('--version-id 格式不正確'); process.exit(2); }
 
 const mode = arg('mode') || 'normal';
-if (!['normal', 'maintenance'].includes(mode)) { console.error('--mode 只能是 normal 或 maintenance'); process.exit(2); }
+if (!['normal', 'maintenance', 'closed'].includes(mode)) { console.error('--mode 只能是 normal、maintenance 或 closed'); process.exit(2); }
 
 const db = makeSupabase({ url: need('SUPABASE_URL'), serviceKey: need('SUPABASE_SERVICE_ROLE_KEY') });
 const cf = makeCloudflare({ token: need('CLOUDFLARE_API_TOKEN'), accountId: need('CLOUDFLARE_ACCOUNT_ID') });

@@ -31,11 +31,13 @@ function customerReceipt({ shopName, amount, months, paidOn, periodTo, reference
   const text = ["已收到你的款項", "", ...rows.map((r) => r[0] + "：" + r[1]), "", ADD_CONTACT].join("\n");
   return { subject, html, text };
 }
+var LINE_HINT = "有任何問題都可以直接回覆這封信，或用 LINE " + CONTACT.line + " 聯絡我們。";
 
 // supabase/functions/admin-site/handler.mjs
 var MAX_MONTHS = 60;
 var MAX_AMOUNT = 1e7;
-var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "restore_version", "set_domain", "check_domain", "clear_domain"];
+var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain"];
+var PHOTO_BUCKET = "site-photos";
 function taipeiDate(d) {
   return new Date(d.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
 }
@@ -171,14 +173,65 @@ async function handleAdmin(req, deps) {
       return reply({ ok: true, status: "suspended", ...d.ok ? {} : { warning: deployWarn }, message: d.ok ? "已暫停，維護頁約 1–2 分鐘後生效。" : "已暫停，但維護頁沒有啟動部署。" + deployWarn }, 200);
     }
     case "restore": {
-      if (site.status !== "suspended") return fail("not_allowed", "只有暫停中的網站可以恢復", 409);
+      if (!["suspended", "cancelled"].includes(site.status)) return fail("not_allowed", "只有暫停中或已終止的網站可以恢復", 409);
+      const statusFrom = site.status;
       const deployed = !!(site.live_version_id && site.cf_project_name);
       const status = !deployed ? "pending" : site.paid_until && site.paid_until >= today ? "live" : "overdue";
       await db2.patch("rental_sites", "id=eq." + siteId, { status, suspended_at: null, suspend_reason: null });
-      await event("restored", { status_to: status });
+      await event("restored", { status_to: status, status_from: statusFrom });
       if (!deployed) return reply({ ok: true, status, message: "已恢復為「待上線」（這個網站還沒有部署過）。" }, 200);
       const d = await queueDeploy({ versionId: site.live_version_id });
       return reply({ ok: true, status, ...d.ok ? {} : { warning: deployWarn }, message: d.ok ? "已恢復為「" + status + "」，網站約 1–2 分鐘後回來。" : "已恢復，但部署沒有啟動。" + deployWarn }, 200);
+    }
+    // 終止租用：網站改成「已終止」，網址換成「已停止服務」頁；資料（草稿、版本、照片、收款紀錄）全部保留，可以再按「恢復」。
+    case "terminate": {
+      const reason = body.reason == null ? "" : String(body.reason).trim();
+      if (reason.length > 200) return fail("bad_request", "原因最長 200 字");
+      if (!["pending", "live", "overdue", "suspended"].includes(site.status)) return fail("not_allowed", site.status === "cancelled" ? "這個網站已經是終止狀態" : "這個狀態的網站不能終止", 409);
+      const statusFrom = site.status;
+      await db2.patch("rental_sites", "id=eq." + siteId, { status: "cancelled", suspended_at: null, suspend_reason: null });
+      await event("terminated", { reason, status_from: statusFrom });
+      if (!site.cf_project_name) return reply({ ok: true, status: "cancelled", message: "已終止（這個網站還沒有部署過，沒有網址需要下線）。" }, 200);
+      const d = await queueDeploy({ mode: "closed" });
+      return reply({ ok: true, status: "cancelled", ...d.ok ? {} : { warning: deployWarn }, message: d.ok ? "已終止，「已停止服務」頁約 1–2 分鐘後生效。資料都還保留。" : "已終止，但停止服務頁沒有啟動部署。" + deployWarn }, 200);
+    }
+    // 永久刪除：只有「已終止」的網站可以；必須輸入網址代稱確認。刪 Cloudflare 專案 → 刪照片 → 刪資料庫紀錄（草稿、版本、事件、收款、月報一併刪除）。
+    // 順序是「先刪外部、最後才刪資料庫」，每一步都能安全重試；任何一步失敗就停下來，網站仍保持「已終止」。
+    case "purge": {
+      if (site.status !== "cancelled") return fail("not_allowed", "只有「已終止」的網站可以永久刪除，請先終止租用", 409);
+      if (typeof body.confirm_slug !== "string" || body.confirm_slug.trim() !== site.slug) return fail("confirm_mismatch", "請輸入這個網站的網址代稱「" + site.slug + "」來確認");
+      const steps = [];
+      if (site.cf_project_name) {
+        if (!deps.cf || !deps.cf.deleteProject) return fail("cf_not_configured", "尚未設定 Cloudflare 金鑰，無法刪除網站專案，所以什麼都沒刪", 501);
+        if (site.custom_domain) await deps.cf.removeDomain(site.cf_project_name, site.custom_domain).catch(() => {
+        });
+        try {
+          const r = await deps.cf.deleteProject(site.cf_project_name);
+          steps.push(r.deleted ? "已刪除 Cloudflare 網站專案" : "Cloudflare 專案已經不存在");
+        } catch (e) {
+          return fail("cloudflare_error", "刪除 Cloudflare 專案失敗，所以什麼都沒刪：" + String(e.message || e).slice(0, 200) + "。可以到 Cloudflare 後台手動刪除該專案後再按一次。", 502);
+        }
+      }
+      let photos = 0;
+      try {
+        for (let guard = 0; guard < 50; guard++) {
+          const objs = (await db2.storageList(PHOTO_BUCKET, siteId, { offset: 0, limit: 100 })).filter((o) => o && o.id != null && o.name);
+          if (!objs.length) break;
+          await db2.storageRemove(PHOTO_BUCKET, objs.map((o) => siteId + "/" + o.name));
+          photos += objs.length;
+        }
+      } catch (e) {
+        return fail("storage_error", "網站專案已刪除，但照片沒有刪成功：" + String(e.message || e).slice(0, 200) + "。請再按一次永久刪除。", 502);
+      }
+      steps.push("已刪除 " + photos + " 張照片");
+      try {
+        await db2.remove("rental_sites", "id=eq." + siteId);
+      } catch (e) {
+        return fail("db_error", "外部資料已刪除，但資料庫紀錄沒有刪成功：" + String(e.message || e).slice(0, 200) + "。請再按一次永久刪除。", 502);
+      }
+      steps.push("已刪除資料庫紀錄");
+      console.log("[admin-site] purged site " + siteId + " slug=" + site.slug + " by " + by + "；" + steps.join("；"));
+      return reply({ ok: true, deleted: true, message: "已永久刪除：" + steps.join("、") + "。" }, 200);
     }
     case "restore_version": {
       if (typeof body.version_id !== "string" || !UUID.test(body.version_id)) return fail("bad_request", "缺少版本編號");
@@ -294,6 +347,14 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     async patch(table, query, body) {
       return rest(table + "?" + query, { method: "PATCH", body, prefer: "return=minimal" });
     },
+    // 條件式更新並回傳實際被更新的列（沒有符合條件的列 → 空陣列）。排程用它「先佔位再動作」，避免兩個執行同時處理同一個網站。
+    async patchReturning(table, query, body) {
+      const r = await rest(table + "?" + query, { method: "PATCH", body, prefer: "return=representation" });
+      return r || [];
+    },
+    async remove(table, query) {
+      return rest(table + "?" + query, { method: "DELETE", prefer: "return=minimal" });
+    },
     async insert(table, body) {
       return rest(table, { method: "POST", body, prefer: "return=minimal" });
     },
@@ -303,6 +364,17 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     },
     async list(table, query) {
       return await rest(table + "?" + query) || [];
+    },
+    // Storage：列出某個資料夾（prefix）底下的物件；回傳 [{name,id,created_at,...}]（資料夾的 id 為 null）
+    async storageList(bucket, prefix, { offset = 0, limit = 100 } = {}) {
+      const res = await fetchImpl(base + "/storage/v1/object/list/" + bucket, { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ prefix, limit, offset, sortBy: { column: "name", order: "asc" } }) });
+      if (!res.ok) throw new Error("Storage list " + prefix + " → " + res.status);
+      return res.json();
+    },
+    async storageRemove(bucket, paths) {
+      const res = await fetchImpl(base + "/storage/v1/object/" + bucket, { method: "DELETE", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ prefixes: paths }) });
+      if (!res.ok) throw new Error("Storage remove → " + res.status);
+      return res.json();
     },
     async download(bucket, path) {
       const res = await fetchImpl(base + "/storage/v1/object/" + bucket + "/" + path.split("/").map(encodeURIComponent).join("/"), { headers: headers() });
@@ -353,6 +425,13 @@ function makeCloudflare({ token, accountId, fetchImpl = fetch }) {
       if (r.status === 404) return { removed: false };
       if (r.status >= 300) throw new Error("Cloudflare 移除網域失敗 (" + r.status + ")：" + errText(r.json));
       return { removed: true };
+    },
+    // 刪除整個 Pages 專案（連同所有部署）。找不到視為已刪除（讓「永久刪除」可以安全重試）
+    async deleteProject(project) {
+      const r = await call(api + "/" + encodeURIComponent(project), { method: "DELETE" });
+      if (r.status === 404) return { deleted: false };
+      if (r.status >= 300) throw new Error("Cloudflare 刪除專案失敗 (" + r.status + ")：" + errText(r.json));
+      return { deleted: true };
     },
     // 查詢網域狀態：Cloudflare 的 status 為 initializing／pending／active／deactivated／blocked／error
     async getDomain(project, domain) {
