@@ -12,12 +12,12 @@ const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', 
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBPVP8 '), Buffer.alloc(40)]);
 const SID = '11111111-1111-1111-1111-111111111111', VID = '22222222-2222-2222-2222-222222222222';
 
-function fakeDb({ status = 'live', content = sample.content, image = WEBP, live_version_id = VID } = {}) {
+function fakeDb({ status = 'live', content = sample.content, image = WEBP, live_version_id = VID, template = 'cafe', siteLayout, verLayout, verPages } = {}) {
   const calls = { events: [], patches: [] };
-  const site = { id: SID, slug: 'wuhou-cafe', template: 'cafe', status, live_version_id, cf_project_name: null, first_published_at: null };
+  const site = { id: SID, slug: 'wuhou-cafe', template, status, live_version_id, cf_project_name: null, first_published_at: null, ...(siteLayout ? { layout: siteLayout } : {}) };
   return {
     calls,
-    getOne: async (t) => (t === 'rental_sites' ? site : { id: VID, content, palette: 'caramel', sections: sample.sections }),
+    getOne: async (t) => (t === 'rental_sites' ? site : { id: VID, content, palette: 'caramel', sections: sample.sections, ...(verLayout ? { layout: verLayout, pages: verPages || {} } : {}) }),
     patch: async (t, q, b) => { calls.patches.push({ t, q, b }); },
     insert: async (t, b) => { calls.events.push(b); },
     download: async () => image
@@ -87,4 +87,20 @@ test('cloudflare ensureProject: gets existing, creates on 404, throws otherwise'
   await assert.rejects(() => cf.ensureProject('n'), /quota/);
   cf = makeCloudflare({ token: 't', accountId: 'a', fetchImpl: mk([[500, {}]]) });
   await assert.rejects(() => cf.ensureProject('n'), /500/);
+});
+
+test('runBuild: multi-page version writes one folder per page; upgraded site renders an old one-page version as multi', async () => {
+  const run = async (opts) => { const db = fakeDb(opts); const out = join(mkdtempSync(join(tmpdir(), 'm-')), 'dist');
+    const r = await runBuild({ siteId: SID, outDir: out, db, cf: fakeCf(), deploy: async () => {}, log: () => {} }); return { r, out, db }; };
+  const a = await run({ siteLayout: 'multi', verLayout: 'multi', verPages: { faq: false }, template: 'salon' });
+  assert.equal(a.r.ok, true);
+  for (const f of ['index.html', 'about/index.html', 'services/index.html', 'space/index.html', 'news/index.html', 'visit/index.html']) assert.ok(existsSync(join(a.out, f)), f);
+  assert.ok(!existsSync(join(a.out, 'faq/index.html')));
+  assert.equal(a.db.calls.events.at(-1).detail.layout, 'multi');
+  const b = await run({ siteLayout: 'multi' });   // 舊版本沒有 layout（一頁版）
+  assert.equal(b.r.ok, true); assert.ok(existsSync(join(b.out, 'menu/index.html')));
+  const c = await run({});                         // 一頁版網站：維持單頁
+  assert.equal(c.r.ok, true); assert.ok(!existsSync(join(c.out, 'menu/index.html')));
+  const d = await run({ template: 'no-such-industry' });
+  assert.equal(d.r.ok, false); assert.match(d.r.error, /行業/);
 });

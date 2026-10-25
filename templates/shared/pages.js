@@ -4,12 +4,14 @@
 // - 只能從一頁升級到多頁，不能改回（資料庫 010 也有同一條規則）。
 // 頁面清單與資料庫 supabase/migrations/010_layout_pages.sql 的允許鍵一致（tests 會比對）。
 import { normalizeSections } from './content.js';
+import { getIndustry } from './industries.js';
 
 export const LAYOUTS = ['single', 'multi'];
 export const LAYOUT_LABELS = { single: '一頁版', multi: '多頁版' };
 
 export const HOME_PAGE = { key: 'home', label: '首頁', path: '' };
-// 順序就是導覽列與 sitemap 的順序；path 是相對網站根目錄的資料夾（建置時輸出 <path>index.html）
+// 順序就是導覽列與 sitemap 的順序；path 是相對網站根目錄的資料夾（建置時輸出 <path>index.html）。
+// 這裡是咖啡店的名稱；其他行業的頁名與網址由 pagesFor(industry) 依行業設定替換（menu／interior／visit 三頁）。
 export const PAGES = [
   { key: 'about', label: '關於', path: 'about/' },
   { key: 'menu', label: '菜單與價格', path: 'menu/' },
@@ -19,6 +21,18 @@ export const PAGES = [
   { key: 'visit', label: '來店資訊', path: 'visit/' }
 ];
 export const PAGE_KEYS = PAGES.map((p) => p.key);
+
+// 依行業回傳六個頁面的名稱與網址（key 不變，資料庫與編輯器只認 key）
+export function pagesFor(industryKey) {
+  const ind = getIndustry(industryKey);
+  if (!ind) return PAGES;
+  return PAGES.map((p) => {
+    if (p.key === 'menu') return { ...p, label: ind.offer.label, path: ind.offer.path };
+    if (p.key === 'interior') return { ...p, label: ind.space.label, path: ind.space.path };
+    if (p.key === 'visit') return { ...p, label: ind.visit.label, path: ind.visit.path };
+    return p;
+  });
+}
 
 export function normalizeLayout(v) {
   return LAYOUTS.includes(v) ? v : 'single';
@@ -51,8 +65,8 @@ export function canChangeLayout(from, to) {
 }
 
 // 會輸出的頁面（含首頁），依導覽順序。一頁版只有首頁。
-export function enabledPages(layout, pages) {
+export function enabledPages(layout, pages, industryKey) {
   if (normalizeLayout(layout) !== 'multi') return [HOME_PAGE];
   const p = normalizePages(pages);
-  return [HOME_PAGE, ...PAGES.filter((x) => p[x.key])];
+  return [HOME_PAGE, ...pagesFor(industryKey).filter((x) => p[x.key])];
 }

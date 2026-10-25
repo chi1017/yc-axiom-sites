@@ -17,8 +17,9 @@ YC AXIOM「網站租用」系統的版型與建置腳本。**這個 repo 是公�
 
 | 路徑 | 內容 |
 | --- | --- |
-| `templates/shared/` | 共用模組：內容正規化 `content.js`、必填檢查 `validate.js`、營業時間 `hours.js`、SEO/JSON-LD `seo.js`、配色 `palettes.js`、slug 規則 `slug.js`、一頁版／多頁版與可勾選頁面 `pages.js`、入口 `site.js` |
-| `templates/cafe/` | 咖啡店版型（`index.js` 輸出 HTML、`styles.js` 輸出 CSS、`sample.json` 範例內容） |
+| `templates/shared/` | 共用模組：內容正規化 `content.js`、必填檢查 `validate.js`、營業時間 `hours.js`、SEO/JSON-LD `seo.js`、配色 `palettes.js`、slug 規則 `slug.js`、一頁版／多頁版與可勾選頁面 `pages.js`、行業設定 `industries.js`、入口 `site.js` |
+| `templates/base/` | 通用版型（所有行業共用；`index.js` 輸出 HTML、`styles.js` 輸出 CSS），一頁版與多頁版都由這裡產生 |
+| `templates/cafe/sample.json` | 範例內容（測試與 `npm run build:sample` 用） |
 | `build/` | 部署腳本：`build-site.mjs`（Actions 進入點）、`run.mjs`（流程）、`lib/`（Supabase、Cloudflare） |
 | `supabase/migrations/005_rental.sql` | 資料表、RLS、Storage 權限 |
 | `supabase/functions/publish-site/` | 發佈用 Edge Function（`dist/index.ts` 是可直接貼進 Supabase 的單一檔案） |
@@ -34,15 +35,18 @@ YC AXIOM「網站租用」系統的版型與建置腳本。**這個 repo 是公�
 ```bash
 npm install
 npm test                 # 單元測試
-npm run build:sample     # 用 sample.json 產出 dist-sample/
+npm run build:sample     # 用 sample.json 產出 dist-sample/（一頁版咖啡店）
 npm run bundle:function  # 重新打包 publish-site（改過 handler 或 templates/shared 後要做）
 ```
 
-## 新增行業版型
+## 新增行業
 
-1. 複製 `templates/cafe/` 為新資料夾，改 `index.js` 的內容與 `kindLabel`、`schemaType`。
-2. 在 `templates/shared/registry.js` 加入。
-3. 資料庫 `rental_sites.template` 的 check 與編輯器的版型選項各加一項。
+在 `templates/shared/industries.js` 的 `ROWS` 加一列（key、名稱、群組、schema.org 類型、價目／照片／來店頁的說法）即可。
+版面、一頁版／多頁版、SEO 全行業共用；資料庫只檢查 key 的格式（`011_industries.sql`），不必改 SQL。
+
+```bash
+node build/build-sample.mjs dist-sample multi salon   # 用範例內容產出美髮沙龍的多頁版
+```
 
 ## GitHub Actions Secrets（Settings → Secrets and variables → Actions）
 

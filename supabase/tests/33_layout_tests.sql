@@ -37,3 +37,12 @@ insert into public.site_versions (site_id, content, palette, sections, layout, p
 select layout, pages from public.site_versions order by layout desc;
 \echo == L10 site_versions 不合法 pages → 期望 check 錯誤
 insert into public.site_versions (site_id, content, palette, sections, pages) select id, '{}', 'forest', '{}', '{"x":true}' from public.rental_sites where slug = 'a-cafe';
+
+\echo == I1 行業（011）：會員建立美髮沙龍 → 期望 salon；會員之後改行業 → 期望 permission denied（行業建立後固定）；後端寫入格式錯誤 → 期望 check 錯誤
+delete from public.rental_sites;
+select set_config('request.jwt.claims','{"sub":"aaaaaaaa-0000-0000-0000-000000000001","role":"authenticated","app_metadata":{}}',false);
+set role authenticated;
+insert into public.rental_sites (member_id, slug, template) values ('aaaaaaaa-0000-0000-0000-000000000001','a-salon','salon') returning template;
+update public.rental_sites set template = 'car-detailing' returning template;
+reset role;
+update public.rental_sites set template = 'Bad_Key';

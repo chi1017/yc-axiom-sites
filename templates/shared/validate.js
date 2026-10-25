@@ -2,12 +2,18 @@ import { SECTION_LABELS, validDate, validTime, DAYS, DAY_LABELS } from './conten
 import { hasAnyHours } from './hours.js';
 import { safeHttpsUrl } from './escape.js';
 import { slugError } from './slug.js';
+import { getIndustry } from './industries.js';
+
+// 價目的稱呼依行業（菜單／服務項目／課程…）；不知道行業時用「價目表」
+const offerWord = (template) => { const i = getIndustry(template); return i ? i.offer.nav : '價目表'; };
 
 // 發佈前檢查。回傳 { ok, errors:[{field,msg}] }；errors 的 msg 直接給使用者看。
 // raw：使用者輸入的原始內容（選填）。正規化會把不合格的網址直接丟掉，帶入 raw 才能明確告訴使用者「哪個連結不合格」。
 // checkBrand：是否檢查網址代稱裡的平台品牌字樣。只有還能改代稱的草稿（第一次發佈前）才檢查；
 //   已發佈過的網站代稱已鎖定，沿用舊代稱不擋。編輯器在輸入代稱時另外用 slugError() 檢查，所以預設 false。
-export function validateForPublish(content, sections, slug, raw, { checkBrand = false } = {}) {
+// template：行業 key（選填），只影響錯誤訊息的用詞
+export function validateForPublish(content, sections, slug, raw, { checkBrand = false, template } = {}) {
+  const W = offerWord(template);
   const errors = [];
   const add = (field, msg) => errors.push({ field, msg });
   if (!content.name) add('name', '請填店名');
@@ -31,8 +37,8 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
 
   if (sections.menu) {
     content.menu.forEach((m, i) => {
-      if (!m.name && !(m.price == null)) add('menu.' + i, '菜單第 ' + (i + 1) + ' 項缺少品名');
-      else if (m.name && m.price == null) add('menu.' + i, '菜單第 ' + (i + 1) + ' 項（' + m.name + '）缺少價格');
+      if (!m.name && !(m.price == null)) add('menu.' + i, W + '第 ' + (i + 1) + ' 項缺少名稱');
+      else if (m.name && m.price == null) add('menu.' + i, W + '第 ' + (i + 1) + ' 項（' + m.name + '）缺少價格');
     });
   }
   if (sections.faq) {
@@ -47,6 +53,7 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
       if (!n.title && n.date) add('news.' + i, '最新消息第 ' + (i + 1) + ' 則缺少標題');
     });
   }
+  if (template !== undefined && !getIndustry(template)) add('template', '不支援的行業類型，請重新選擇');
   const se = slugError(slug, { allowBrand: !checkBrand });
   if (se) add('slug', se);
   return { ok: errors.length === 0, errors };
@@ -55,16 +62,17 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
 export { SECTION_LABELS, validDate };
 
 // 不擋發佈、但會影響「搜尋與 AI 找得到你」的建議事項（依重要性排序）
-export function suggestions(content, sections) {
+export function suggestions(content, sections, template) {
+  const W = offerWord(template);
   const out = [];
   const faqOk = content.faq.filter((f) => f.q && f.a);
-  if (sections.faq && faqOk.length < 3) out.push({ field: 'faq', msg: '常見問題建議至少填 3 題（例如：需要訂位嗎？有插座嗎？可以帶寵物嗎？），搜尋與 AI 最常引用這種問與答' });
+  if (sections.faq && faqOk.length < 3) out.push({ field: 'faq', msg: '常見問題建議至少填 3 題（例如：需要預約嗎？怎麼付款？附近好停車嗎？），搜尋與 AI 最常引用這種問與答' });
   else if (sections.faq && faqOk.some((f) => [...f.a].length < 30)) out.push({ field: 'faq', msg: '常見問題的回答建議寫 30 字以上，太短不容易被引用' });
-  if ([...content.intro].length < 150) out.push({ field: 'intro', msg: '店家介紹建議寫 150 字以上：店的特色、座位、使用方式，讓人（與 AI）知道你是怎樣的店' });
+  if ([...content.intro].length < 150) out.push({ field: 'intro', msg: '店家介紹建議寫 150 字以上：特色、服務方式、適合誰，讓人（與 AI）知道你是怎樣的店' });
   if (!content.tagline) out.push({ field: 'tagline', msg: '填一句話介紹，會顯示在首頁標題下方，也會用在搜尋結果的說明文字' });
-  if (sections.menu && content.menu.filter((m) => m.name).length < 3) out.push({ field: 'menu', msg: '菜單建議至少列 3 項，客人與搜尋都更容易看懂你賣什麼' });
+  if (sections.menu && content.menu.filter((m) => m.name).length < 3) out.push({ field: 'menu', msg: W + '建議至少列 3 項，客人與搜尋都更容易看懂你提供什麼' });
   if (!content.phone) out.push({ field: 'phone', msg: '建議填電話，客人與搜尋結果都會用到' });
-  if (sections.interior && content.photos.room.length < 1) out.push({ field: 'photos.room', msg: '建議上傳 1–3 張店內照片' });
+  if (sections.interior && content.photos.room.length < 1) out.push({ field: 'photos.room', msg: '建議上傳 1–6 張照片' });
   if (!content.social.instagram && !content.social.facebook && !content.social.line) out.push({ field: 'social', msg: '有 Instagram、Facebook 或 LINE 的話建議填上連結，可幫助搜尋確認這是同一家店' });
   return out;
 }

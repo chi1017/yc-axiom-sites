@@ -236,10 +236,10 @@ async function handleAdmin(req, deps) {
     case "restore_version": {
       if (typeof body.version_id !== "string" || !UUID.test(body.version_id)) return fail("bad_request", "缺少版本編號");
       if (!["live", "overdue"].includes(site.status)) return fail("not_allowed", "只有上線中或已逾期的網站可以還原版本", 409);
-      const ver = await db2.getOne("site_versions", "id=eq." + body.version_id + "&site_id=eq." + siteId + "&select=id,content,palette,sections,created_at");
+      const ver = await db2.getOne("site_versions", "id=eq." + body.version_id + "&site_id=eq." + siteId + "&select=id,content,palette,sections,layout,pages,created_at");
       if (!ver) return fail("not_found", "找不到這個版本", 404);
       const overwrite = body.overwrite_draft === true;
-      if (overwrite) await db2.patch("rental_sites", "id=eq." + siteId, { content: ver.content, palette: ver.palette, sections: ver.sections });
+      if (overwrite) await db2.patch("rental_sites", "id=eq." + siteId, { content: ver.content, palette: ver.palette, sections: ver.sections, ...ver.layout === "multi" ? { pages: ver.pages } : {} });
       await event("version_restore_queued", { version_id: ver.id, overwrite_draft: overwrite });
       const d = await queueDeploy({ versionId: ver.id });
       return d.ok ? reply({ ok: true, message: "已排入還原" + (overwrite ? "（並已覆蓋會員草稿）" : "（會員草稿未更動）") + "，約 1–2 分鐘。" }, 200) : fail("dispatch_failed", "沒有送出成功：" + deployWarn, 502);

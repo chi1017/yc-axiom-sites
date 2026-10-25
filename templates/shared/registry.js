@@ -1,5 +1,11 @@
-import { cafe } from '../cafe/index.js';
-// 新增行業模板：在 templates/ 下新增資料夾，匯出同樣介面的物件，再加到這裡。
-export const TEMPLATES = { cafe };
-export function getTemplate(id) { return TEMPLATES[id] || null; }
-export const TEMPLATE_IDS = Object.keys(TEMPLATES);
+// 版型登錄：所有行業共用 templates/base，依 industries.js 的行業設定換用詞與 schema.org 類型。
+import { makeTemplate } from '../base/index.js';
+import { INDUSTRIES, getIndustry } from './industries.js';
+
+const CACHE = {};
+export function getTemplate(id) {
+  const ind = getIndustry(id);
+  if (!ind) return null;
+  return CACHE[id] || (CACHE[id] = makeTemplate(ind));
+}
+export const TEMPLATE_IDS = INDUSTRIES.map((i) => i.key);
