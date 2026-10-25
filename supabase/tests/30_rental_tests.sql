@@ -123,6 +123,21 @@ set role anon;
 select public.rental_slug_available('b-cafe-ok');
 reset role;
 
+\echo == R15b 品牌字樣代稱（009）：available 期望 f f f t t；會員建立 yc-b-cafe → 期望 check 錯誤
+select set_config('request.jwt.claims','{"sub":"bbbbbbbb-0000-0000-0000-000000000002","role":"authenticated","app_metadata":{}}',false);
+set role authenticated;
+select public.rental_slug_available('yc-cafe'), public.rental_slug_available('cafe-yc'), public.rental_slug_available('my-ycaxiom'), public.rental_slug_available('mycafe'), public.rental_slug_available('cycle-shop');
+insert into public.rental_sites (member_id, slug) values ('bbbbbbbb-0000-0000-0000-000000000002','yc-b-cafe');
+reset role;
+\echo == R15c 舊網站沿用品牌代稱：改內容 → 期望 UPDATE 1；改成另一個品牌代稱 → 期望 check 錯誤；改成一般代稱 → 期望 UPDATE 1
+alter table public.rental_sites disable trigger rental_sites_guard_slug_brand;
+insert into public.rental_sites (member_id, slug) values ('bbbbbbbb-0000-0000-0000-000000000002','yc-legacy');
+alter table public.rental_sites enable trigger rental_sites_guard_slug_brand;
+update public.rental_sites set content = '{"name":"舊店"}' where slug = 'yc-legacy';
+update public.rental_sites set slug = 'yc-legacy-2' where slug = 'yc-legacy';
+update public.rental_sites set slug = 'legacy-ok' where slug = 'yc-legacy';
+delete from public.rental_sites where slug in ('yc-legacy', 'legacy-ok');
+
 \echo == R16 Storage：A 只能寫自己網站的資料夾
 insert into storage.objects (bucket_id, name) values ('site-photos', 'x') on conflict do nothing;
 delete from storage.objects;

@@ -8,9 +8,9 @@ const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', 
 const UID = 'aaaaaaaa-0000-0000-0000-000000000001', SID = '11111111-1111-1111-1111-111111111111';
 const ORIGIN = 'https://chi1017.github.io';
 
-function setup({ status = 'draft', content = sample.content, consented = true, terms = '2026-10-01T00:00:00Z', events = [], owner = UID, dispatchOk = true, mailOk = true } = {}) {
+function setup({ slug = 'wuhou-cafe', status = 'draft', content = sample.content, consented = true, terms = '2026-10-01T00:00:00Z', events = [], owner = UID, dispatchOk = true, mailOk = true } = {}) {
   const log = { patches: [], events: [], versions: [], mails: [], dispatches: [] };
-  const site = { id: SID, member_id: owner, slug: 'wuhou-cafe', status, content, palette: 'ink', sections: sample.sections, terms_accepted_at: terms };
+  const site = { id: SID, member_id: owner, slug, status, content, palette: 'ink', sections: sample.sections, terms_accepted_at: terms };
   const eq = (q, k) => (q.match(new RegExp('(?:^|&)' + k + '=eq\\.([^&]+)')) || [])[1];
   const db = {
     getOne: async (t, q) => {
@@ -112,4 +112,12 @@ test('first publish requires accepted terms (draft only); pending/live are not b
   const s = setup({ terms: null }); const r = await s.call(); const j = await r.json();
   assert.equal(r.status, 403); assert.equal(j.error, 'terms_required'); assert.equal(s.log.versions.length, 0); assert.equal(s.log.mails.length, 0);
   for (const status of ['pending', 'live', 'overdue']) assert.equal((await setup({ status, terms: null }).call()).status, 200, status);
+});
+
+test('brand slug: a draft must change it before first publish; already-published sites keep their locked slug', async () => {
+  const d = await setup({ slug: 'yc-cafe' }).call(); assert.equal(d.status, 422);
+  assert.ok((await d.json()).errors.some((e) => e.field === 'slug'));
+  for (const status of ['pending', 'live', 'overdue']) {
+    const r = await setup({ slug: 'yc-cafe', status }).call(); assert.equal(r.status, 200, status);
+  }
 });

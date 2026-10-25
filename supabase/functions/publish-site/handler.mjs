@@ -51,7 +51,7 @@ export async function handlePublish(req, deps) {
 
   // 以資料庫裡的草稿為準（不相信瀏覽器送來的內容）
   const content = normalizeContent(site.content), palette = normalizePalette(site.palette), sections = normalizeSections(site.sections);
-  const check = validateForPublish(content, sections, site.slug, site.content);
+  const check = validateForPublish(content, sections, site.slug, site.content, { checkBrand: site.status === 'draft' });
   if (!check.ok) return reply({ error: 'validation', message: '還有必填項目沒完成', errors: check.errors }, 422);
 
   // 頻率限制：兩次發佈至少間隔 20 秒；24 小時內最多 30 次
