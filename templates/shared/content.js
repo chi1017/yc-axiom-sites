@@ -11,6 +11,8 @@ export const LIMITS = {
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
 export const HERO_STYLES = ['card', 'full'];
+// 首頁樣式：standard＝區塊依序排列；magazine＝滿版主視覺＋圖文左右交錯大區塊＋資訊帶＋照片牆（雜誌式）
+export const HOME_STYLES = ['standard', 'magazine'];
 export const SECTION_KEYS = ['menu', 'interior', 'faq', 'news'];
 export const SECTION_LABELS = { menu: '菜單', interior: '店內環境', faq: '常見問題', news: '最新消息' };
 
@@ -27,6 +29,7 @@ export function emptyContent() {
     booking: { label: '', url: '' },
     photos: { hero: null, room: [] },
     heroStyle: 'card',
+    homeStyle: 'standard',
     menu: [], faq: [], news: []
   };
 }
@@ -91,6 +94,7 @@ export function normalizeContent(raw) {
   c.photos.room = arr(ph.room).map(photo).filter(Boolean).slice(0, LIMITS.room);
   // 主視覺樣式：card＝右側圓角照片（原本的樣式，舊網站預設）；full＝滿版大圖疊字
   c.heroStyle = HERO_STYLES.includes(r.heroStyle) ? r.heroStyle : 'card';
+  c.homeStyle = HOME_STYLES.includes(r.homeStyle) ? r.homeStyle : 'standard';
 
   c.menu = arr(r.menu).slice(0, LIMITS.menu).map((m) => {
     const o = m && typeof m === 'object' ? m : {};

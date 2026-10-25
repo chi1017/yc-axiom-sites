@@ -5,7 +5,8 @@ import { buildSite, imagePlan } from '../templates/shared/site.js';
 import { normalizeContent, normalizePalette, normalizeSections } from '../templates/shared/content.js';
 import { validateForPublish } from '../templates/shared/validate.js';
 import { normalizeLayout, normalizePages, pagesFromSections } from '../templates/shared/pages.js';
-import { sniffImage, MAX_IMAGE_BYTES } from './lib/images.mjs';
+import { buildHeadingFont, HEADING_FONT_FILE } from './lib/heading-font.mjs';
+import { sniffImage, MAX_IMAGE_BYTES, makeSmall } from './lib/images.mjs';
 import { buildMaintenancePage, shopContact } from '../templates/shared/maintenance.js';
 import { buildClosedPage } from '../templates/shared/closed.js';
 import { customerGoLive } from '../supabase/functions/_shared/emails.mjs';
@@ -18,6 +19,8 @@ export const HEADERS_FILE = `/*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
 /images/*
+  Cache-Control: public, max-age=3600
+/fonts/*
   Cache-Control: public, max-age=3600
 `;
 
@@ -51,20 +54,30 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     const siteUrl = 'https://' + (useCustom ? site.custom_domain : project.subdomain) + '/';
     log('Cloudflare 專案：' + project.name + (project.created ? '（新建立）' : '') + ' → ' + siteUrl);
 
-    const built = buildSite({ template: site.template, content, palette, sections, layout, pages, siteUrl, lastmod: now().toISOString().slice(0, 10) });
-    rmSync(outDir, { recursive: true, force: true });
-    mkdirSync(outDir, { recursive: true });
-    for (const [f, c] of Object.entries(built.files)) { mkdirSync(dirname(join(outDir, f)), { recursive: true }); writeFileSync(join(outDir, f), c); }
-    writeFileSync(join(outDir, '_headers'), HEADERS_FILE);
-
+    // 先下載所有照片並產生手機用小圖；全部成功才在網頁加 srcset，任何一張失敗就只用原圖（不擋部署）
+    const images = [];
     for (const img of imagePlan(content)) {
       const buf = await db.download(BUCKET, img.path);
       if (buf.length > MAX_IMAGE_BYTES) throw new Error('圖片太大：' + img.role);
       if (!sniffImage(buf)) throw new Error('圖片格式不正確：' + img.role);
-      const dest = join(outDir, img.file);
-      mkdirSync(dirname(dest), { recursive: true });
-      writeFileSync(dest, buf);
+      images.push({ ...img, buf });
     }
+    let variants = true;
+    try { for (const img of images) img.smallBuf = await makeSmall(img.buf); } catch (e) { variants = false; log('手機小圖產生失敗，改用原圖：' + e.message); }
+
+    const buildArgs = { template: site.template, content, palette, sections, layout, pages, siteUrl, imageVariants: variants, lastmod: now().toISOString().slice(0, 10) };
+    let built = buildSite({ ...buildArgs, headingFont: true });
+    // 標題字型：只含標題用到的字；產生失敗就改用系統字重建（不讓字型問題擋住部署）
+    let fontBuf = null;
+    try { fontBuf = await buildHeadingFont(built.files); } catch (e) { log('標題字型產生失敗，改用系統字：' + e.message); }
+    if (!fontBuf) built = buildSite(buildArgs);
+    rmSync(outDir, { recursive: true, force: true });
+    mkdirSync(outDir, { recursive: true });
+    const put = (rel, data) => { const dest = join(outDir, rel); mkdirSync(dirname(dest), { recursive: true }); writeFileSync(dest, data); };
+    for (const [f, c] of Object.entries(built.files)) put(f, c);
+    if (fontBuf) put(HEADING_FONT_FILE, fontBuf);
+    writeFileSync(join(outDir, '_headers'), HEADERS_FILE);
+    for (const img of images) { put(img.file, img.buf); if (variants) put(img.small, img.smallBuf); }
 
     await deploy({ dir: outDir, project: project.name });
 

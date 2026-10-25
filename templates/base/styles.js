@@ -1,20 +1,21 @@
 // 版型固定由 YC 設計；客戶只能換配色（CSS 變數）與主視覺樣式。
-export function baseCss(c) {
-  return `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
+// headingFont：建置時有產生 fonts/heading.woff2（只含標題用到的字）才加 @font-face；預覽與舊網站用系統字
+export function baseCss(c, { headingFont = false } = {}) {
+  return (headingFont ? '@font-face{font-family:"SiteHeading";src:url(/fonts/heading.woff2) format("woff2");font-weight:700;font-style:normal;font-display:swap}\n' : '') + `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:16px/1.8 -apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC","Microsoft JhengHei","Segoe UI",sans-serif}
 img{max-width:100%;height:auto;display:block}
 main{flex:1 0 auto}
 a{color:var(--accent)}
-h1,h2,h3{font-family:"Noto Serif TC","Songti TC","PMingLiU",Georgia,serif;line-height:1.25;margin:0}
+h1,h2,h3{font-family:"SiteHeading","Noto Serif TC","Songti TC","PMingLiU",Georgia,serif;line-height:1.25;margin:0}
 .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
 .sr{position:absolute;left:-9999px}
 .skip{position:absolute;left:-999px;top:0;background:var(--accent);color:var(--on-accent);padding:8px 14px;z-index:20}
 .skip:focus{left:8px;top:8px}
 .top{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
 .top .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px;flex-wrap:wrap}
-.brand{font:700 19px/1.3 "Noto Serif TC","Songti TC",Georgia,serif;color:var(--text);text-decoration:none}
+.brand{font:700 19px/1.3 "SiteHeading","Noto Serif TC","Songti TC",Georgia,serif;color:var(--text);text-decoration:none}
 .top nav{display:flex;gap:4px 20px;flex-wrap:wrap;font-size:15px}
 .top nav a{color:var(--muted);text-decoration:none;padding:6px 0;border-bottom:2px solid transparent;transition:color .18s,border-color .18s}
 .top nav a:hover,.top nav a[aria-current=page]{color:var(--accent);border-bottom-color:var(--accent)}
@@ -96,6 +97,23 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 
 .foot-nav a:hover{color:var(--accent)}
 .ph{background:rgba(127,127,127,.18);border:1px dashed var(--muted);border-radius:6px;padding:0 6px;color:var(--muted);font-weight:400}
 .ph-img{display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;border-radius:18px;background:var(--surface);border:2px dashed var(--muted);color:var(--muted)}
+.split-full{display:grid;padding:0;background:var(--bg)}
+.split-full.alt{background:var(--alt)}
+.split-full figure{margin:0;position:relative;aspect-ratio:4/3;overflow:hidden;background:var(--surface)}
+.split-full figure img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.split-full .txt{padding:56px 20px;align-self:center}
+.split-full .txt p{max-width:34em}
+h2.big{font-size:clamp(34px,5.2vw,60px);margin-bottom:24px;letter-spacing:.01em}
+.menu.one{grid-template-columns:1fr}
+.qa{margin-bottom:22px}.qa h3{font-size:19px;margin-bottom:6px}.qa p{margin:0}
+.band{text-align:center;background:var(--alt)}
+.band-grid{display:grid;gap:28px;margin-top:8px}
+.band h3{font-size:18px;margin-bottom:8px}.band p{margin:2px 0;color:var(--muted)}
+.strip{padding:0}
+.strip-grid{display:grid;grid-template-columns:repeat(2,1fr)}
+.strip figure{margin:0;overflow:hidden}
+.strip img{width:100%;aspect-ratio:3/4;object-fit:cover;transition:transform .5s ease}
+.strip figure:hover img{transform:scale(1.03)}
 .js-rv .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
 .js-rv .rv.in{opacity:1;transform:none}
 @media(min-width:760px){
@@ -105,6 +123,12 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 
  .gallery{columns:3 220px}
  .news li{grid-template-columns:130px 1fr}
  .visit-grid{grid-template-columns:1fr 1fr}
+ .split-full{grid-template-columns:1fr 1fr;min-height:600px}
+ .split-full figure{aspect-ratio:auto;min-height:600px}
+ .split-full.left figure{order:0}.split-full.right figure{order:2}
+ .split-full .txt{padding:96px clamp(32px,6vw,104px)}
+ .band-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+ .strip-grid{grid-template-columns:repeat(var(--n),1fr)}
 }
 @media(max-width:759px){
  section{padding:56px 0}
@@ -119,7 +143,24 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 
  .js-nav .top nav.open{display:flex}
  .js-nav .top nav a{padding:12px 0;border-bottom:1px solid var(--line);font-size:16px}
 }
-@media print{.js-rv .rv{opacity:1;transform:none}}
+@media print{.split-full{display:grid;padding:0;background:var(--bg)}
+.split-full.alt{background:var(--alt)}
+.split-full figure{margin:0;position:relative;aspect-ratio:4/3;overflow:hidden;background:var(--surface)}
+.split-full figure img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.split-full .txt{padding:56px 20px;align-self:center}
+.split-full .txt p{max-width:34em}
+h2.big{font-size:clamp(34px,5.2vw,60px);margin-bottom:24px;letter-spacing:.01em}
+.menu.one{grid-template-columns:1fr}
+.qa{margin-bottom:22px}.qa h3{font-size:19px;margin-bottom:6px}.qa p{margin:0}
+.band{text-align:center;background:var(--alt)}
+.band-grid{display:grid;gap:28px;margin-top:8px}
+.band h3{font-size:18px;margin-bottom:8px}.band p{margin:2px 0;color:var(--muted)}
+.strip{padding:0}
+.strip-grid{display:grid;grid-template-columns:repeat(2,1fr)}
+.strip figure{margin:0;overflow:hidden}
+.strip img{width:100%;aspect-ratio:3/4;object-fit:cover;transition:transform .5s ease}
+.strip figure:hover img{transform:scale(1.03)}
+.js-rv .rv{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 `;
 }
