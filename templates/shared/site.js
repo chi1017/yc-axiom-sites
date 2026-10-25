@@ -19,15 +19,20 @@ export function effectiveSections(content, sections, preview) {
 function ext(path) { const m = String(path).match(/\.(webp|jpe?g|png)$/i); return m ? m[1].toLowerCase().replace('jpeg', 'jpg') : 'webp'; }
 
 // 部署包裡的圖片檔名（固定，與客戶上傳檔名無關）
+// small：手機用的小尺寸版本（寬 800px、WebP），建置時由原圖產生（build/lib/images.mjs makeSmall）
+export const SMALL_WIDTH = 800;
 export function imagePlan(content) {
   const out = [];
-  if (content.photos.hero) out.push({ role: 'hero', file: 'images/hero.' + ext(content.photos.hero.path), path: content.photos.hero.path });
-  content.photos.room.forEach((p, i) => out.push({ role: 'room-' + (i + 1), file: 'images/room-' + (i + 1) + '.' + ext(p.path), path: p.path }));
+  const add = (role, p) => out.push({ role, file: 'images/' + role + '.' + ext(p.path), small: 'images/' + role + '-' + SMALL_WIDTH + '.webp', path: p.path, w: p.w || 0 });
+  if (content.photos.hero) add('hero', content.photos.hero);
+  content.photos.room.forEach((p, i) => add('room-' + (i + 1), p));
   return out;
 }
 
 /**
- * input: { template, content, palette, sections, layout?, pages?, page?, siteUrl, preview?, imageSrc?(role, photo, plannedFile), lastmod? }
+ * input: { template, content, palette, sections, layout?, pages?, page?, siteUrl, preview?, imageSrc?(role, photo, plannedFile), lastmod?, headingFont? }
+ *  - imageVariants：true 時圖片加上 srcset（呼叫端要另外寫入 images/<role>-800.webp）
+ *  - headingFont：true 時 CSS 加上標題網頁字型（呼叫端要另外寫入 fonts/heading.woff2）
  *  - template：行業 key（industries.js），所有行業共用同一套版型
  *  - layout：'single'（預設，一頁版）｜'multi'（多頁版，依 pages 勾選輸出各頁）
  *  - page：預覽時要看哪一頁（多頁版），省略為首頁
@@ -50,7 +55,8 @@ export function buildSite(input) {
   const sections = multi ? { menu: pagesOn.menu, interior: pagesOn.interior, faq: pagesOn.faq, news: pagesOn.news } : normalizeSections(input.sections);
   const siteUrl = String(input.siteUrl || 'https://example.pages.dev/').replace(/\/?$/, '/');
   const plan = imagePlan(content);
-  const fileOf = {}; plan.forEach((p) => { fileOf[p.role] = p.file; });
+  const fileOf = {}, planOf = {}; plan.forEach((p) => { fileOf[p.role] = p.file; planOf[p.role] = p; });
+  const variants = !preview && !!input.imageVariants;   // 建置端會另外寫入 small 檔
   const show = effectiveSections(content, sections, preview);
   // 實際輸出的頁面：勾選了、而且（正式建置時）有內容可放
   const hasContent = { about: true, visit: true, menu: show.menu, interior: show.interior, news: show.news, faq: show.faq };
@@ -58,6 +64,7 @@ export function buildSite(input) {
   const pathOf = Object.fromEntries(pageList.map((p) => [p.key, p.path]));
   const base = {
     tpl, content, paletteId, colors: getPalette(paletteId), sections, show, siteUrl, preview, layout, pageList,
+    headingFont: !preview && !!input.headingFont,   // 建置端會另外產生 fonts/heading.woff2（build/lib/heading-font.mjs）
     address: parseAddress(content.address),
     images: plan.map((p) => p.file),
     heroFile: fileOf.hero || '',
@@ -69,8 +76,10 @@ export function buildSite(input) {
     // 建置時不傳 imageSrc → 一律用 images/ 相對路徑（子頁加 ../）；預覽頁傳入 Supabase 公開網址
     const imageSrc = (role, photo) => (input.imageSrc ? input.imageSrc(role, photo, fileOf[role]) : (fileOf[role] ? up + fileOf[role] : ''));
     const href = (key) => (key === 'home' ? (up || './') : up + (pathOf[key] || ''));
+    // srcset：原圖寬度大於 800 才提供小圖；寬度不明時當作 1600（編輯器上傳上限）
+    const srcsetOf = (role) => { const p = planOf[role]; if (!variants || !p) return ''; const w = p.w || 1600; return w > SMALL_WIDTH ? up + p.small + ' ' + SMALL_WIDTH + 'w, ' + up + p.file + ' ' + w + 'w' : ''; };
     const model = {
-      ...base, page: pg.key, pageInfo: multi ? pg : null, imageSrc, href,
+      ...base, page: pg.key, pageInfo: multi ? pg : null, imageSrc, srcsetOf, href,
       pageUrl: absUrl(siteUrl, pg.path),
       // FAQPage：一頁版在首頁；多頁版在常見問題頁（全部）與首頁（前幾題，與畫面上顯示的一致）
       faqOnPage: multi ? (pg.key === 'faq' ? true : pg.key === 'home' ? 'teaser' : false) : true,

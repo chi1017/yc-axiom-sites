@@ -149,3 +149,62 @@ test('404 page: built for single and multi, noindex, root links to every page, n
     assert.ok(!BRAND.test(nf));
   }
 });
+
+// ── 雜誌式首頁、依螢幕挑圖、標題字型 ──
+import { buildHeadingFont, headingText } from '../build/lib/heading-font.mjs';
+import { makeSmall } from '../build/lib/images.mjs';
+
+test('magazine home: full hero, alternating split blocks, info band, photo strip; every industry; links resolve', () => {
+  const c = JSON.parse(JSON.stringify(sample.content)); c.homeStyle = 'magazine';
+  c.photos.room = [1, 2, 3, 4, 5, 6].map((i) => ({ path: 'x/r' + i + '.webp', w: 1600, h: 1200 }));
+  for (const layout of ['single', 'multi']) {
+    const { files } = build({ content: c, layout });
+    const { document: d } = parseHTML(files['index.html']);
+    assert.ok(d.querySelector('section.hero.full'), layout);
+    const splits = [...d.querySelectorAll('section.split-full')];
+    assert.equal(splits.length, 3, layout);
+    assert.deepEqual(splits.map((s) => s.classList.contains('right') ? 'R' : 'L'), ['R', 'L', 'R']);
+    assert.ok(d.querySelector('section.band') && d.querySelectorAll('.strip img').length === 3, layout);
+    assert.equal(d.querySelectorAll('h1').length, 1);
+    let last = 1; d.querySelectorAll('h1,h2,h3').forEach((h) => { const n = Number(h.tagName[1]); assert.ok(n <= last + 1, layout + ' skip ' + h.tagName); last = n; });
+  }
+  for (const ind of INDUSTRIES) assert.ok(build({ template: ind.key, content: c }).html.includes('split-full'), ind.key);
+});
+
+test('responsive images: srcset only in real builds with variants; sizes match the layout', () => {
+  const c = JSON.parse(JSON.stringify(sample.content)); c.homeStyle = 'magazine';
+  c.photos.hero = { path: 'x/h.webp', w: 1600, h: 1067 };
+  c.photos.room = [{ path: 'x/1.webp', w: 1600, h: 1200 }, { path: 'x/2.webp', w: 700, h: 900 }];
+  const on = parseHTML(build({ content: c, imageVariants: true }).html).document;
+  const hero = on.querySelector('#top img');
+  assert.equal(hero.getAttribute('srcset'), 'images/hero-800.webp 800w, images/hero.webp 1600w');
+  assert.equal(hero.getAttribute('sizes'), '100vw');
+  assert.equal(on.querySelector('#about img').getAttribute('sizes'), '(min-width:760px) 50vw, 100vw');
+  assert.equal(on.querySelector('#menu img').getAttribute('srcset'), null, 'narrow original gets no srcset');
+  assert.equal(on.querySelector('#about img').getAttribute('fetchpriority'), 'low');
+  assert.ok(!build({ content: c }).html.includes('srcset'));
+  assert.ok(!buildSite({ template: 'cafe', siteUrl: URL_, ...sample, content: c, imageVariants: true, preview: true, imageSrc: () => 'https://x/y.webp' }).html.includes('srcset'));
+  const multiFiles = build({ content: c, layout: 'multi', imageVariants: true }).files;
+  assert.ok(parseHTML(multiFiles['about/index.html']).document.querySelector('img').getAttribute('srcset').startsWith('../images/room-1-800.webp'));
+});
+
+test('heading font: @font-face only when requested; subset holds exactly the heading characters', async () => {
+  assert.ok(!build().html.includes('@font-face'));
+  const { files } = build({ headingFont: true });
+  assert.ok(files['index.html'].includes('font-family:"SiteHeading";src:url(/fonts/heading.woff2)'));
+  assert.ok(!buildSite({ template: 'cafe', siteUrl: URL_, ...sample, headingFont: true, preview: true }).html.includes('@font-face'));
+  const text = headingText(files);
+  assert.ok(text.includes('午') && text.includes('問') && !text.includes('<'));
+  const font = await buildHeadingFont(files);
+  assert.equal(font.slice(0, 4).toString('latin1'), 'wOF2');
+  assert.ok(font.length < 80 * 1024, 'subset stays small: ' + font.length);
+});
+
+test('makeSmall: 800px WebP from a large image, never enlarges', async () => {
+  const { default: sharp } = await import('sharp');
+  const big = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#a08060' } }).jpeg().toBuffer();
+  const meta = await sharp(await makeSmall(big)).metadata();
+  assert.equal(meta.format, 'webp'); assert.equal(meta.width, 800);
+  const small = await sharp({ create: { width: 500, height: 400, channels: 3, background: '#ccc' } }).png().toBuffer();
+  assert.equal((await sharp(await makeSmall(small)).metadata()).width, 500);
+});

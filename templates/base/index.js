@@ -29,11 +29,15 @@ function ctx(m) {
   };
 }
 
-function img(x, role, p, alt, eager) {
+// sizes：圖片在版面上的顯示寬度，瀏覽器據此從 srcset 挑小圖（手機）或原圖（電腦）
+const SZ = { full: '100vw', half: '(min-width:760px) 50vw, 100vw', third: '(min-width:760px) 33vw, 50vw' };
+function img(x, role, p, alt, eager, sizes = SZ.half) {
   const tall = p.w && p.h && p.h > p.w;
-  return '<img src="' + esc(x.m.imageSrc(role, p)) + '" alt="' + esc(p.alt || alt) + '"' +
+  const set = x.m.srcsetOf ? x.m.srcsetOf(role) : '';
+  return '<img src="' + esc(x.m.imageSrc(role, p)) + '"' + (set ? ' srcset="' + esc(set) + '" sizes="' + esc(sizes) + '"' : '') + ' alt="' + esc(p.alt || alt) + '"' +
     (p.w ? ' width="' + p.w + '" height="' + p.h + '"' : '') + (tall ? ' class="tall"' : '') +
-    (eager === 'high' ? ' fetchpriority="high" decoding="async"' : eager ? ' decoding="async"' : ' loading="lazy" decoding="async"') + '>';
+    // 非首屏照片標低優先，避免和主視覺（LCP）搶頻寬
+    (eager === 'high' ? ' fetchpriority="high" decoding="async"' : eager ? ' decoding="async"' : ' loading="lazy" fetchpriority="low" decoding="async"') + '>';
 }
 const more = (x, key, text) => '<p class="more"><a href="' + esc(x.m.href(key)) + '">' + text + '</a></p>';
 
@@ -41,8 +45,8 @@ const more = (x, key, text) => '<p class="more"><a href="' + esc(x.m.href(key)) 
 function heroSec(x) {
   const { c, preview } = x;
   const heroPhoto = c.photos.hero;
-  const full = c.heroStyle === 'full' && (heroPhoto || preview);
-  const heroImg = heroPhoto ? img(x, 'hero', heroPhoto, x.nm + ' 店家主視覺', 'high')
+  const full = (c.heroStyle === 'full' || c.homeStyle === 'magazine') && (heroPhoto || preview);
+  const heroImg = heroPhoto ? img(x, 'hero', heroPhoto, x.nm + ' 店家主視覺', 'high', full ? SZ.full : SZ.half)
     : (preview ? '<div class="ph-img">[主視覺照片]</div>' : '');
   const actions = [];
   if (x.bookUrl && c.booking.label) actions.push('<a class="btn" href="' + esc(x.bookUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(c.booking.label) + '</a>');
@@ -140,7 +144,7 @@ function interiorSec(x, mode) {
   const rooms = x.c.photos.room;
   const list = mode === 'teaser' ? rooms.slice(0, 3) : rooms;
   // 照片頁：照片就是主要內容，全部直接載入（第一張優先）；其他頁的照片延遲載入
-  const figs = list.map((p, i) => '<figure>' + img(x, 'room-' + (i + 1), p, x.nm + ' ' + x.t.space.label + ' ' + (i + 1), mode === 'page' && (i === 0 ? 'high' : true)) + '</figure>');
+  const figs = list.map((p, i) => '<figure>' + img(x, 'room-' + (i + 1), p, x.nm + ' ' + x.t.space.label + ' ' + (i + 1), mode === 'page' && (i === 0 ? 'high' : true), SZ.third) + '</figure>');
   if (!rooms.length && x.preview) for (let i = 0; i < 3; i++) figs.push('<figure><div class="ph-img">[照片 ' + (i + 1) + ']</div></figure>');
   return '<section id="interior"><div class="wrap">' + (mode === 'page' ? '' : '<h2>' + esc(x.t.space.label) + '</h2>') + '<div class="gallery">' + figs.join('') + '</div>' +
     (mode === 'teaser' ? more(x, 'interior', esc(x.t.space.more)) : '') + '</div></section>';
@@ -199,6 +203,56 @@ function visitSec(x, mode) {
     '</div></section>';
 }
 
+// ── 雜誌式首頁 ──
+// 滿版圖文對半的大區塊（side：圖片在左 'left' 或右 'right'）
+function splitBlock(x, id, title, body, photo, role, side) {
+  if (!photo) return '<section id="' + id + '"><div class="wrap"><h2>' + title + '</h2>' + body + '</div></section>';
+  return '<section class="split-full ' + side + '" id="' + id + '"><figure>' + img(x, role, photo, x.nm + ' ' + x.t.space.label) + '</figure>' +
+    '<div class="txt"><h2 class="big">' + title + '</h2>' + body + '</div></section>';
+}
+function infoBand(x) {
+  const { c } = x;
+  const cols = [];
+  if (c.address) cols.push('<div><h3>地址</h3><p>' + esc(x.plainAddr || c.address) + '</p>' + (x.mapUrl ? '<p><a href="' + esc(x.mapUrl) + '" target="_blank" rel="noopener noreferrer">Google 地圖</a></p>' : '') + '</div>');
+  if (hasAnyHours(c.hours)) cols.push('<div><h3>營業時間</h3>' + groupHours(c.hours).map((g) => '<p>' + esc(g.label) + '：' + esc(g.text) + '</p>').join('') + '</div>');
+  if (c.phone) cols.push('<div><h3>聯絡</h3><p>' + (x.tel ? '<a href="' + esc(x.tel) + '">' + esc(c.phone) + '</a>' : esc(c.phone)) + '</p>' +
+    (x.bookUrl && c.booking.label ? '<p><a href="' + esc(x.bookUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(c.booking.label) + '</a></p>' : '') + '</div>');
+  if (!cols.length) return '';
+  return '<section class="band" id="info"><div class="wrap"><h2 class="big">歡迎來訪</h2><div class="band-grid">' + cols.join('') + '</div></div></section>';
+}
+function photoStrip(x, photos, from) {
+  if (!photos.length) return '';
+  return '<section class="strip" aria-label="' + esc(x.t.space.label) + '"><div class="strip-grid" style="--n:' + photos.length + '">' +
+    photos.map((p, i) => '<figure>' + img(x, 'room-' + (from + i), p, x.nm + ' ' + x.t.space.label + ' ' + (from + i), false, '(min-width:760px) ' + Math.ceil(100 / photos.length) + 'vw, 50vw') + '</figure>').join('') + '</div></section>';
+}
+function magazineMain(x, multi) {
+  const { c } = x, s = x.m.show;
+  const rooms = c.photos.room;
+  const paras = paragraphs(c.intro);
+  const aboutBody = (paras.length ? paras.map((p) => '<p>' + esc(p) + '</p>').join('') : '') + autoAbout(x).map((p) => '<p>' + p + '</p>').join('') +
+    (multi && x.on('about') ? more(x, 'about', '認識我們') : '');
+  const menuItems = multi ? x.menu.slice(0, 6) : x.menu;
+  const menuBody = '<ul class="menu one">' + menuItems.map((i) => '<li><span>' + esc(i.name) + '</span><span class="price">' + (i.price != null ? 'NT$ ' + i.price : '') + '</span></li>').join('') + '</ul>' +
+    (multi && x.on('menu') ? more(x, 'menu', esc(x.t.offer.more)) : '<p class="note">' + esc(x.t.offer.note) + '</p>');
+  const faqList = multi ? x.faq.slice(0, FAQ_TEASER) : x.faq;
+  const q = (t) => (/[？?]$/.test(t) ? t : t + '？');
+  const faqBody = faqList.map((i) => '<div class="qa"><h3>' + esc(q(i.q)) + '</h3><p>' + esc(i.a) + '</p></div>').join('') +
+    (multi && x.on('faq') && x.faq.length > FAQ_TEASER ? more(x, 'faq', '看所有問題') : '');
+  const blocks = [heroSec(x), splitBlock(x, 'about', '關於' + x.name, aboutBody, rooms[0], 'room-1', 'right')];
+  if (s.menu && x.menu.length) blocks.push(splitBlock(x, 'menu', esc(x.t.offer.label), menuBody, rooms[1], 'room-2', 'left'));
+  if (s.faq && x.faq.length) blocks.push(splitBlock(x, 'faq', '常見問題', faqBody, rooms[2], 'room-3', 'right'));
+  blocks.push(infoBand(x));
+  if (s.interior) blocks.push(photoStrip(x, rooms.slice(3), 4));
+  if (multi) {
+    if (x.on('news') && s.news) blocks.push(newsSec(x, 'teaser'));
+    if (!x.on('visit')) blocks.push(visitSec(x, 'section'));
+  } else {
+    if (s.news) blocks.push(newsSec(x, 'section'));
+    blocks.push(visitSec(x, 'section'));
+  }
+  return blocks;
+}
+
 // 一頁版：全部區塊在首頁
 function singleMain(x) {
   const s = x.m.show;
@@ -254,10 +308,11 @@ function render(m) {
     : [['about', true], ['menu', m.show.menu], ['interior', m.show.interior], ['news', m.show.news], ['faq', m.show.faq], ['visit', true]]
       .filter((i) => i[1]).map((i) => [i[0], esc(short[i[0]]), '#' + i[0]]);
   const nav = navItems.map((i) => '<a href="' + esc(i[2]) + '"' + (multi && i[0] === m.page ? ' aria-current="page"' : '') + '>' + i[1] + '</a>').join('');
-  const main = multi ? (m.page === 'home' ? multiHomeMain(x) : multiPageMain(x, m.page)) : singleMain(x);
+  const magazine = c.homeStyle === 'magazine';
+  const main = multi ? (m.page === 'home' ? (magazine ? magazineMain(x, true) : multiHomeMain(x)) : multiPageMain(x, m.page)) : (magazine ? magazineMain(x, false) : singleMain(x));
   const footNav = multi ? '<nav class="foot-nav" aria-label="頁尾選單"><a href="' + esc(m.href('home')) + '">首頁</a>' + navItems.map((i) => '<a href="' + esc(i[2]) + '">' + i[1] + '</a>').join('') + '</nav>' : '';
   const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + '</span>' + footNav + '</div></footer>';
-  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors) + '</style>\n</head>\n<body>\n' +
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
     '<a class="skip" href="#main">跳到主要內容</a>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : '#top') + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
@@ -273,7 +328,7 @@ function renderNotFound(m) {
   const links = [['/', '回首頁'], ...m.pageList.filter((p) => p.key !== 'home').map((p) => ['/' + p.path, p.label])];
   return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     '<title>找不到這個頁面' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
-    '<style>' + baseCss(m.colors) + '</style>\n</head>\n<body>\n' +
+    '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
     '<main id="main"><section class="page-head"><div class="wrap"><p class="kicker">404</p><h1>找不到這個頁面</h1>' +
     '<p class="lead">網址可能打錯了，或這個頁面已經不存在。</p><p class="more">' +

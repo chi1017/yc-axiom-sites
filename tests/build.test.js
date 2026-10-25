@@ -104,3 +104,19 @@ test('runBuild: multi-page version writes one folder per page; upgraded site ren
   const d = await run({ template: 'no-such-industry' });
   assert.equal(d.r.ok, false); assert.match(d.r.error, /行業/);
 });
+
+test('runBuild: real photos get 800px variants + srcset and the heading font; broken photos fall back to originals only', async () => {
+  const { default: sharp } = await import('sharp');
+  const real = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#8a6a4a' } }).webp().toBuffer();
+  const out = join(mkdtempSync(join(tmpdir(), 'v-')), 'dist');
+  const r = await runBuild({ siteId: SID, outDir: out, db: fakeDb({ image: real }), cf: fakeCf(), deploy: async () => {}, log: () => {} });
+  assert.equal(r.ok, true);
+  for (const f of ['images/hero-800.webp', 'images/room-3-800.webp', 'fonts/heading.woff2']) assert.ok(existsSync(join(out, f)), f);
+  const html = readFileSync(join(out, 'index.html'), 'utf8');
+  assert.ok(html.includes('srcset="images/hero-800.webp 800w') && html.includes('@font-face'));
+  // 測試用的假 WebP 無法縮圖 → 只用原圖、沒有 srcset，部署照常成功
+  const out2 = join(mkdtempSync(join(tmpdir(), 'v-')), 'dist');
+  const r2 = await runBuild({ siteId: SID, outDir: out2, db: fakeDb(), cf: fakeCf(), deploy: async () => {}, log: () => {} });
+  assert.equal(r2.ok, true);
+  assert.ok(!existsSync(join(out2, 'images/hero-800.webp')) && !readFileSync(join(out2, 'index.html'), 'utf8').includes('srcset'));
+});
