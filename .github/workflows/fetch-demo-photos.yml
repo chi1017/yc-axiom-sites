@@ -1,0 +1,28 @@
+name: Fetch demo photos
+
+# 手動執行（一次性）：下載示範站照片，推到 demo-photos 分支，再開 PR 合併。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node build/fetch-demo-photos.mjs
+      - name: Push to demo-photos branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b demo-photos
+          git add templates/cafe/demo-images
+          git commit -m "示範站改用真實照片（Unsplash）"
+          git push -f origin demo-photos
