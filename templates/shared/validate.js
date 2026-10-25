@@ -5,7 +5,9 @@ import { slugError } from './slug.js';
 
 // 發佈前檢查。回傳 { ok, errors:[{field,msg}] }；errors 的 msg 直接給使用者看。
 // raw：使用者輸入的原始內容（選填）。正規化會把不合格的網址直接丟掉，帶入 raw 才能明確告訴使用者「哪個連結不合格」。
-export function validateForPublish(content, sections, slug, raw) {
+// checkBrand：是否檢查網址代稱裡的平台品牌字樣。只有還能改代稱的草稿（第一次發佈前）才檢查；
+//   已發佈過的網站代稱已鎖定，沿用舊代稱不擋。編輯器在輸入代稱時另外用 slugError() 檢查，所以預設 false。
+export function validateForPublish(content, sections, slug, raw, { checkBrand = false } = {}) {
   const errors = [];
   const add = (field, msg) => errors.push({ field, msg });
   if (!content.name) add('name', '請填店名');
@@ -45,7 +47,7 @@ export function validateForPublish(content, sections, slug, raw) {
       if (!n.title && n.date) add('news.' + i, '最新消息第 ' + (i + 1) + ' 則缺少標題');
     });
   }
-  const se = slugError(slug);
+  const se = slugError(slug, { allowBrand: !checkBrand });
   if (se) add('slug', se);
   return { ok: errors.length === 0, errors };
 }

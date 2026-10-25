@@ -107,9 +107,12 @@ function fakeDb(siteOver = {}) {
 }
 const fcf = { ensureProject: async (name) => ({ name, subdomain: name + '.pages.dev', created: false }) };
 
-test('closed page: noindex, escaped shop name, fixed contact info, no customer content', () => {
-  const p = buildClosedPage({ shopName: '<script>x</script>咖啡' });
-  assert.ok(p.html.includes('noindex,nofollow') && p.html.includes('網站已停止服務') && p.html.includes('@788cblaq') && p.html.includes('ycaxiom@gmail.com'));
+test('closed page: noindex, escaped shop name, shop own contact only, no platform brand or contact, no customer content', () => {
+  const p = buildClosedPage({ shopName: '<script>x</script>咖啡', phone: '04-2222-3333', line: 'https://line.me/R/ti/p/@lucy' });
+  assert.ok(p.html.includes('noindex,nofollow') && p.html.includes('網站已停止服務'));
+  assert.ok(p.html.includes('tel:0422223333') && p.html.includes('https://line.me/R/ti/p/@lucy'));
+  assert.ok(!/yc[ _-]?axiom|788cblaq|ycaxiom@gmail\.com/i.test(p.html), 'no platform brand / contact');
+  assert.ok(!buildClosedPage({ shopName: '店' }).html.includes('如需聯絡店家'));
   assert.ok(!p.html.includes('<script>') && p.html.includes('&lt;script&gt;'));
   assert.deepEqual(Object.keys(p.files).sort(), ['index.html', 'robots.txt']); assert.ok(p.files['robots.txt'].includes('Disallow: /'));
 });

@@ -5,7 +5,7 @@ import { buildSite, imagePlan } from '../templates/shared/site.js';
 import { normalizeContent, normalizePalette, normalizeSections } from '../templates/shared/content.js';
 import { validateForPublish } from '../templates/shared/validate.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './lib/images.mjs';
-import { buildMaintenancePage } from '../templates/shared/maintenance.js';
+import { buildMaintenancePage, shopContact } from '../templates/shared/maintenance.js';
 import { buildClosedPage } from '../templates/shared/closed.js';
 import { customerGoLive } from '../supabase/functions/_shared/emails.mjs';
 
@@ -110,8 +110,7 @@ async function runMaintenance({ site, outDir, db, cf, deploy, event, log, t0, no
     return { ok: true, skipped: true };
   }
   const project = await cf.ensureProject(site.cf_project_name);
-  const shopName = (site.content && site.content.name) || '';
-  const page = buildMaintenancePage({ shopName });
+  const page = buildMaintenancePage(shopContact(site));
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   for (const [f, c] of Object.entries(page.files)) writeFileSync(join(outDir, f), c);
@@ -132,8 +131,7 @@ async function runClosed({ site, outDir, db, cf, deploy, event, log, t0, now }) 
     return { ok: true, skipped: true };
   }
   const project = await cf.ensureProject(site.cf_project_name);
-  const shopName = (site.content && site.content.name) || '';
-  const page = buildClosedPage({ shopName });
+  const page = buildClosedPage(shopContact(site));
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   for (const [f, c] of Object.entries(page.files)) writeFileSync(join(outDir, f), c);

@@ -32,8 +32,19 @@ test('jsonForScript cannot break out of script tag', () => {
 });
 test('slugError', () => {
   assert.equal(slugError('my-cafe-01'), '');
-  for (const bad of ['', 'ab', 'a'.repeat(31), 'My-Cafe', '-abc', 'abc-', 'a--b', 'admin', 'www', 'test', 'api', 'yc', 'caf_e', '咖啡店'])
+  for (const bad of ['', 'ab', 'a'.repeat(31), 'My-Cafe', '-abc', 'abc-', 'a--b', 'admin', 'www', 'test', 'api', 'yc', 'caf_e', '咖啡店', 'ycaxiom', 'yc-axiom', 'yc-cafe', 'cafe-yc', 'my-yc-cafe', 'cafe-ycaxiom', 'ycaxiom-cafe'])
     assert.notEqual(slugError(bad), '', bad);
+  for (const ok of ['mycafe', 'bicycle', 'lucy-cafe', 'cycle-shop']) assert.equal(slugError(ok), '', ok);
+  // 已鎖定的舊代稱：略過品牌檢查，但其他規則照舊
+  assert.equal(slugError('yc-cafe', { allowBrand: true }), '');
+  assert.notEqual(slugError('admin', { allowBrand: true }), '');
+});
+
+test('SQL brand slug regex matches slug.js BRAND_RE', async () => {
+  const { BRAND_RE } = await import('../templates/shared/slug.js');
+  const sql = readFileSync(new URL('../supabase/migrations/009_slug_brand.sql', import.meta.url), 'utf8');
+  const m = sql.match(/p_slug !~ '([^']+)'/);
+  assert.ok(m, 'regex found in 009'); assert.equal(m[1], BRAND_RE.source);
 });
 
 test('normalizeContent never throws and enforces limits', () => {
