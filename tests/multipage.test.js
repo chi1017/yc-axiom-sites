@@ -208,3 +208,18 @@ test('makeSmall: 800px WebP from a large image, never enlarges', async () => {
   const small = await sharp({ create: { width: 500, height: 400, channels: 3, background: '#ccc' } }).png().toBuffer();
   assert.equal((await sharp(await makeSmall(small)).metadata()).width, 500);
 });
+
+test('subpages: short lead (not padded description), visible FAQ teaser without FAQPage, hours as list', async () => {
+  const { buildSite } = await import('../templates/shared/site.js');
+  const { readFileSync } = await import('node:fs');
+  const s = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', import.meta.url)));
+  const r = buildSite({ template: 'cafe', siteUrl: 'https://x.pages.dev/', ...s, layout: 'multi' });
+  const about = r.files['about/index.html'], space = r.files['space/index.html'], faq = r.files['faq/index.html'];
+  const lead = about.match(/<p class="lead">([^<]*)/)[1];
+  assert.ok([...lead].length <= 100, lead);
+  assert.ok(!/^(.+)：\1/.test(lead), 'name not repeated');
+  assert.match(space, /<section[^>]*id="faq"/);
+  assert.ok(!/FAQPage/.test(space), 'no duplicate FAQPage markup on subpages');
+  assert.match(faq, /FAQPage/);
+  assert.match(space, /<ul class="hours-list">/);
+});

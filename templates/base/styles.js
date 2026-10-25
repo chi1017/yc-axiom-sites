@@ -86,6 +86,7 @@ dl.info{margin:0}
 dl.info dt{font-weight:700;margin-top:14px}
 dl.info dt:first-child{margin-top:0}
 dl.info dd{margin:2px 0 0}
+.hours-list{list-style:none;margin:0;padding:0}.hours-list li{margin:0}
 table.hours{border-collapse:collapse;width:100%;max-width:440px}
 table.hours th,table.hours td{text-align:left;padding:9px 0;border-bottom:1px solid var(--line);font-weight:400}
 table.hours th{color:var(--muted);padding-right:20px;white-space:nowrap}
