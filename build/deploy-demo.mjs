@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { buildSite } from '../templates/shared/site.js';
+import { buildSite, VARIANT_WIDTHS } from '../templates/shared/site.js';
 import { makeCloudflare } from './lib/cloudflare.mjs';
 import { HEADERS_FILE } from './run.mjs';
 import { buildHeadingFont, HEADING_FONT_FILE } from './lib/heading-font.mjs';
@@ -39,7 +39,7 @@ export async function buildDemo({ layout, homeStyle, siteUrl, outDir }) {
   mkdirSync(join(outDir, 'images'), { recursive: true });
   for (const f of readdirSync(IMG_DIR)) {
     copyFileSync(join(IMG_DIR, f), join(outDir, 'images', f));
-    writeFileSync(join(outDir, 'images', f.replace(/\.webp$/, '-800.webp')), await makeSmall(readFileSync(join(IMG_DIR, f))));
+    for (const w of VARIANT_WIDTHS) writeFileSync(join(outDir, 'images', f.replace(/\.webp$/, '-' + w + '.webp')), await makeSmall(readFileSync(join(IMG_DIR, f)), w));
   }
   mkdirSync(join(outDir, 'fonts'), { recursive: true }); writeFileSync(join(outDir, HEADING_FONT_FILE), font);
   writeFileSync(join(outDir, '_headers'), HEADERS_FILE + '/*\n  X-Robots-Tag: noindex, nofollow\n');

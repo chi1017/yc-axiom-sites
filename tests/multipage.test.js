@@ -177,15 +177,15 @@ test('responsive images: srcset only in real builds with variants; sizes match t
   c.photos.room = [{ path: 'x/1.webp', w: 1600, h: 1200 }, { path: 'x/2.webp', w: 700, h: 900 }];
   const on = parseHTML(build({ content: c, imageVariants: true }).html).document;
   const hero = on.querySelector('#top img');
-  assert.equal(hero.getAttribute('srcset'), 'images/hero-800.webp 800w, images/hero.webp 1600w');
+  assert.equal(hero.getAttribute('srcset'), 'images/hero-480.webp 480w, images/hero-800.webp 800w, images/hero.webp 1600w');
   assert.equal(hero.getAttribute('sizes'), '100vw');
   assert.equal(on.querySelector('#about img').getAttribute('sizes'), '(min-width:760px) 50vw, 100vw');
-  assert.equal(on.querySelector('#menu img').getAttribute('srcset'), null, 'narrow original gets no srcset');
+  assert.equal(on.querySelector('#menu img').getAttribute('srcset'), 'images/room-2-480.webp 480w, images/room-2.webp 700w', 'only variants narrower than the original');
   assert.equal(on.querySelector('#about img').getAttribute('fetchpriority'), 'low');
   assert.ok(!build({ content: c }).html.includes('srcset'));
   assert.ok(!buildSite({ template: 'cafe', siteUrl: URL_, ...sample, content: c, imageVariants: true, preview: true, imageSrc: () => 'https://x/y.webp' }).html.includes('srcset'));
   const multiFiles = build({ content: c, layout: 'multi', imageVariants: true }).files;
-  assert.ok(parseHTML(multiFiles['about/index.html']).document.querySelector('img').getAttribute('srcset').startsWith('../images/room-1-800.webp'));
+  assert.ok(parseHTML(multiFiles['about/index.html']).document.querySelector('img').getAttribute('srcset').startsWith('../images/room-1-480.webp 480w, ../images/room-1-800.webp 800w'));
 });
 
 test('heading font: @font-face only when requested; subset holds exactly the heading characters', async () => {

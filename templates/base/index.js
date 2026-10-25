@@ -30,6 +30,7 @@ function ctx(m) {
 }
 
 // sizes：圖片在版面上的顯示寬度，瀏覽器據此從 srcset 挑小圖（手機）或原圖（電腦）
+const EAGER_GALLERY = 2;
 const SZ = { full: '100vw', half: '(min-width:760px) 50vw, 100vw', third: '(min-width:760px) 33vw, 50vw' };
 function img(x, role, p, alt, eager, sizes = SZ.half) {
   const tall = p.w && p.h && p.h > p.w;
@@ -143,8 +144,8 @@ function menuSec(x, mode) {
 function interiorSec(x, mode) {
   const rooms = x.c.photos.room;
   const list = mode === 'teaser' ? rooms.slice(0, 3) : rooms;
-  // 照片頁：照片就是主要內容，全部直接載入（第一張優先）；其他頁的照片延遲載入
-  const figs = list.map((p, i) => '<figure>' + img(x, 'room-' + (i + 1), p, x.nm + ' ' + x.t.space.label + ' ' + (i + 1), mode === 'page' && (i === 0 ? 'high' : true), SZ.third) + '</figure>');
+  // 照片頁：前幾張（首屏內）直接載入，其餘延遲載入，避免同時下載搶頻寬拖慢首屏；其他頁的照片都延遲載入
+  const figs = list.map((p, i) => '<figure>' + img(x, 'room-' + (i + 1), p, x.nm + ' ' + x.t.space.label + ' ' + (i + 1), mode === 'page' && i < EAGER_GALLERY, SZ.third) + '</figure>');
   if (!rooms.length && x.preview) for (let i = 0; i < 3; i++) figs.push('<figure><div class="ph-img">[照片 ' + (i + 1) + ']</div></figure>');
   return '<section id="interior"><div class="wrap">' + (mode === 'page' ? '' : '<h2>' + esc(x.t.space.label) + '</h2>') + '<div class="gallery">' + figs.join('') + '</div>' +
     (mode === 'teaser' ? more(x, 'interior', esc(x.t.space.more)) : '') + '</div></section>';
