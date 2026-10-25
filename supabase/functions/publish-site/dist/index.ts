@@ -252,19 +252,20 @@ var RESERVED_SLUGS = [
   "supabase",
   "github"
 ];
-function slugError(slug) {
+var BRAND_RE = /(^|-)yc(-|$)|ycaxiom/;
+function slugError(slug, { allowBrand = false } = {}) {
   const s = String(slug == null ? "" : slug);
   if (!s) return "請填網址代稱";
   if (s.length < 3 || s.length > 30) return "網址代稱要 3–30 個字";
   if (!/^[a-z0-9-]+$/.test(s)) return "只能使用小寫英文、數字與連字號（-）";
   if (s.startsWith("-") || s.endsWith("-")) return "開頭與結尾不能是連字號";
   if (s.includes("--")) return "不能連續兩個連字號";
-  if (RESERVED_SLUGS.includes(s)) return "這個名稱是系統保留字，請換一個";
+  if (RESERVED_SLUGS.includes(s) || !allowBrand && BRAND_RE.test(s)) return "這個名稱是系統保留字，請換一個";
   return "";
 }
 
 // templates/shared/validate.js
-function validateForPublish(content, sections, slug, raw) {
+function validateForPublish(content, sections, slug, raw, { checkBrand = false } = {}) {
   const errors = [];
   const add = (field, msg) => errors.push({ field, msg });
   if (!content.name) add("name", "請填店名");
@@ -302,7 +303,7 @@ function validateForPublish(content, sections, slug, raw) {
       if (!n.title && n.date) add("news." + i, "最新消息第 " + (i + 1) + " 則缺少標題");
     });
   }
-  const se = slugError(slug);
+  const se = slugError(slug, { allowBrand: !checkBrand });
   if (se) add("slug", se);
   return { ok: errors.length === 0, errors };
 }
@@ -324,6 +325,7 @@ function adminFirstPublish({ shopName, slug, previewUrl, memberEmail, adminUrl }
   return { subject, html, text };
 }
 var ADD_CONTACT = "為避免我們的信件被歸到垃圾信匣，請把 " + CONTACT.email + " 加入你的聯絡人；直接回覆這封信也會寄到我們的信箱。";
+var LINE_HINT = "有任何問題都可以直接回覆這封信，或用 LINE " + CONTACT.line + " 聯絡我們。";
 
 // supabase/functions/_shared/http.mjs
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -372,7 +374,7 @@ async function handlePublish(req, deps) {
   }
   if (site.status === "draft" && !site.terms_accepted_at) return reply({ error: "terms_required", message: "請先閱讀並同意網站租用條款" }, 403);
   const content = normalizeContent(site.content), palette = normalizePalette(site.palette), sections = normalizeSections(site.sections);
-  const check = validateForPublish(content, sections, site.slug, site.content);
+  const check = validateForPublish(content, sections, site.slug, site.content, { checkBrand: site.status === "draft" });
   if (!check.ok) return reply({ error: "validation", message: "還有必填項目沒完成", errors: check.errors }, 422);
   const since = new Date(now.getTime() - 24 * 3600 * 1e3).toISOString();
   const recent = await db2.list("site_events", "site_id=eq." + siteId + "&type=in.(published_first,version_saved,deploy_queued)&created_at=gte." + encodeURIComponent(since) + "&select=created_at&order=created_at.desc&limit=" + MAX_PER_DAY);
@@ -425,6 +427,14 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     async patch(table, query, body) {
       return rest(table + "?" + query, { method: "PATCH", body, prefer: "return=minimal" });
     },
+    // 條件式更新並回傳實際被更新的列（沒有符合條件的列 → 空陣列）。排程用它「先佔位再動作」，避免兩個執行同時處理同一個網站。
+    async patchReturning(table, query, body) {
+      const r = await rest(table + "?" + query, { method: "PATCH", body, prefer: "return=representation" });
+      return r || [];
+    },
+    async remove(table, query) {
+      return rest(table + "?" + query, { method: "DELETE", prefer: "return=minimal" });
+    },
     async insert(table, body) {
       return rest(table, { method: "POST", body, prefer: "return=minimal" });
     },
@@ -434,6 +444,17 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     },
     async list(table, query) {
       return await rest(table + "?" + query) || [];
+    },
+    // Storage：列出某個資料夾（prefix）底下的物件；回傳 [{name,id,created_at,...}]（資料夾的 id 為 null）
+    async storageList(bucket, prefix, { offset = 0, limit = 100 } = {}) {
+      const res = await fetchImpl(base + "/storage/v1/object/list/" + bucket, { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ prefix, limit, offset, sortBy: { column: "name", order: "asc" } }) });
+      if (!res.ok) throw new Error("Storage list " + prefix + " → " + res.status);
+      return res.json();
+    },
+    async storageRemove(bucket, paths) {
+      const res = await fetchImpl(base + "/storage/v1/object/" + bucket, { method: "DELETE", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ prefixes: paths }) });
+      if (!res.ok) throw new Error("Storage remove → " + res.status);
+      return res.json();
     },
     async download(bucket, path) {
       const res = await fetchImpl(base + "/storage/v1/object/" + bucket + "/" + path.split("/").map(encodeURIComponent).join("/"), { headers: headers() });
