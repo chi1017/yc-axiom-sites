@@ -72,7 +72,8 @@ export function buildSite(input) {
     const model = {
       ...base, page: pg.key, pageInfo: multi ? pg : null, imageSrc, href,
       pageUrl: absUrl(siteUrl, pg.path),
-      faqOnPage: multi ? pg.key === 'faq' : true,
+      // FAQPage：一頁版在首頁；多頁版在常見問題頁（全部）與首頁（前幾題，與畫面上顯示的一致）
+      faqOnPage: multi ? (pg.key === 'faq' ? true : pg.key === 'home' ? 'teaser' : false) : true,
       title: multi ? pageTitle(content, tpl, pg) : buildTitle(content, tpl),
       description: multi ? pageDescription(content, tpl, pg) : buildDescription(content, tpl)
     };

@@ -5,6 +5,8 @@ import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
 import { pagesFor } from '../shared/pages.js';
 import { baseCss } from './styles.js';
 
+// 多頁版首頁放前幾題常見問題（含 FAQPage 結構化資料），其餘在常見問題頁
+export const FAQ_TEASER = 3;
 const PH_NAME = '店名', PH_TAG = '一句話介紹你的店', PH_ADDR = '店家地址', PH_PHONE = '電話';
 
 // 頁面輸出的小工具。m.page：目前輸出的頁面 key；m.layout：single／multi；m.pageList：會輸出的頁面（含首頁）
@@ -55,8 +57,26 @@ function heroSec(x) {
 }
 
 // ── 子頁的頁首（多頁版每頁一個 h1）──
-function pageHead(x, title) {
-  return '<section class="page-head" id="top"><div class="wrap"><p class="kicker">' + x.name + '</p><h1>' + title + '</h1></div></section>';
+// 子頁頁首：頁名（h1）＋一段介紹（與 meta description 相同）；本頁沒有照片時放主視覺照片
+function pageHead(x, title, key) {
+  const hero = x.c.photos.hero;
+  const withImg = hero && !['interior', 'about'].includes(key);
+  const text = '<div><p class="kicker">' + x.name + '</p><h1>' + title + '</h1><p class="lead">' + esc(x.m.description) + '</p></div>';
+  if (!withImg) return '<section class="page-head" id="top"><div class="wrap">' + text + '</div></section>';
+  return '<section class="page-head" id="top"><div class="wrap hero-grid">' + text + '<figure>' + img(x, 'hero', hero, x.nm + ' 店家主視覺', 'high') + '</figure></div></section>';
+}
+
+// 子頁底部：來店資訊摘要（每頁都有店名、地址、電話，有利在地搜尋）
+function contactStrip(x) {
+  const { c } = x;
+  const hs = hasAnyHours(c.hours) ? hoursSummary(c.hours) : '';
+  const rows = [];
+  if (c.address) rows.push('<dt>地址</dt><dd>' + esc(c.address) + (x.mapUrl ? '（<a href="' + esc(x.mapUrl) + '" target="_blank" rel="noopener noreferrer">Google 地圖</a>）' : '') + '</dd>');
+  if (c.phone) rows.push('<dt>電話</dt><dd>' + (x.tel ? '<a href="' + esc(x.tel) + '">' + esc(c.phone) + '</a>' : esc(c.phone)) + '</dd>');
+  if (hs) rows.push('<dt>營業時間</dt><dd>' + esc(hs) + '</dd>');
+  if (!rows.length) return '';
+  return '<section class="contact-strip"><div class="wrap"><h2>' + x.name + ' ' + esc(x.t.visit.label) + '</h2><dl class="info">' + rows.join('') + '</dl>' +
+    (x.on('visit') ? more(x, 'visit', '交通與完整' + esc(x.t.visit.label)) : more(x, 'home', '回首頁')) + '</div></section>';
 }
 
 // 自動產生的介紹句（店名、位置、菜單價格區間）
@@ -82,8 +102,9 @@ function aboutSec(x, mode) {
   const paras = paragraphs(c.intro);
   let body;
   if (mode === 'teaser') {
-    body = (paras.length ? '<p>' + esc(paras[0]) + '</p>' : (preview ? '<p>' + x.ph('店家介紹') + '</p>' : autoAbout(x).map((p) => '<p>' + p + '</p>').join(''))) +
-      (x.on('about') ? more(x, 'about', '認識我們') : '');
+    // 首頁保留完整介紹（AI 搜尋與搜尋引擎最看重首頁的文字量）；關於頁另外有配圖
+    body = (paras.length ? paras.map((p) => '<p>' + esc(p) + '</p>').join('') : (preview ? '<p>' + x.ph('店家介紹') + '</p>' : '')) +
+      autoAbout(x).map((p) => '<p>' + p + '</p>').join('') + (x.on('about') ? more(x, 'about', '認識我們') : '');
   } else {
     body = (paras.length ? paras.map((p) => '<p>' + esc(p) + '</p>').join('') : (preview ? '<p>' + x.ph('店家介紹：這間店的故事、特色與想讓客人知道的事') + '</p>' : '')) +
       autoAbout(x).map((p) => '<p>' + p + '</p>').join('');
@@ -101,7 +122,14 @@ function aboutSec(x, mode) {
 function menuSec(x, mode) {
   const items = x.menu.length ? x.menu : (x.preview ? [{ name: null, price: null }, { name: null, price: null }, { name: null, price: null }] : []);
   const list = mode === 'teaser' ? items.slice(0, 4) : items;
-  return '<section id="menu"><div class="wrap">' + (mode === 'page' ? '' : '<h2>' + esc(x.t.offer.label) + '</h2>') + '<ul class="menu">' +
+  if (mode === 'page') {
+    // 價目頁用表格：AI 搜尋與搜尋引擎較容易正確引用名稱與價格
+    return '<section id="menu"><div class="wrap"><table class="price-table"><caption class="sr">' + esc(x.t.offer.label) + '</caption>' +
+      '<thead><tr><th scope="col">' + esc(x.t.offer.item) + '</th><th scope="col">價格</th></tr></thead><tbody>' +
+      list.map((i) => '<tr><th scope="row">' + (i.name ? esc(i.name) : x.ph(x.t.offer.item + '名稱')) + '</th><td>' + (i.price != null ? 'NT$ ' + i.price : x.ph('價格')) + '</td></tr>').join('') +
+      '</tbody></table><p class="note">' + esc(x.t.offer.note) + '</p></div></section>';
+  }
+  return '<section id="menu"><div class="wrap"><h2>' + esc(x.t.offer.label) + '</h2><ul class="menu">' +
     list.map((i) => '<li><span>' + (i.name ? esc(i.name) : x.ph(x.t.offer.item + '名稱')) + '</span><span class="price">' +
       (i.price != null ? 'NT$ ' + i.price : x.ph('價格')) + '</span></li>').join('') + '</ul>' +
     (mode === 'teaser' ? more(x, 'menu', esc(x.t.offer.more)) : '<p class="note">' + esc(x.t.offer.note) + '</p>') + '</div></section>';
@@ -133,9 +161,10 @@ function faqSec(x, mode) {
   const items = x.faq.length ? x.faq : (x.preview ? [{ q: '', a: '' }, { q: '', a: '' }] : []);
   const q = (s) => (/[？?]$/.test(s) ? s : s + '？');
   const hq = mode === 'page' ? 'h2' : 'h3';
+  const list = mode === 'teaser' ? items.slice(0, FAQ_TEASER) : items;
   return '<section id="faq"><div class="wrap">' + (mode === 'page' ? '' : '<h2>常見問題</h2>') +
-    items.map((i) => '<div class="faq-item"><' + hq + '>' + (i.q ? esc(q(i.q)) : x.ph('你的問題')) + '</' + hq + '><p>' + (i.a ? esc(i.a) : x.ph('你的回答')) + '</p></div>').join('') +
-    '</div></section>';
+    list.map((i) => '<div class="faq-item"><' + hq + '>' + (i.q ? esc(q(i.q)) : x.ph('你的問題')) + '</' + hq + '><p>' + (i.a ? esc(i.a) : x.ph('你的回答')) + '</p></div>').join('') +
+    (mode === 'teaser' && items.length > FAQ_TEASER ? more(x, 'faq', '看所有問題') : '') + '</div></section>';
 }
 
 // ── 來店資訊 ── mode 'teaser'：首頁只放地址、電話、營業時間摘要與連結
@@ -184,6 +213,7 @@ function multiHomeMain(x) {
     x.on('menu') && s.menu ? menuSec(x, 'teaser') : '',
     x.on('interior') && s.interior ? interiorSec(x, 'teaser') : '',
     x.on('news') && s.news ? newsSec(x, 'teaser') : '',
+    x.on('faq') && s.faq ? faqSec(x, 'teaser') : '',
     x.on('visit') ? visitSec(x, 'teaser') : visitSec(x, 'section')];
 }
 
@@ -191,7 +221,7 @@ function multiPageMain(x, key) {
   const title = key === 'about' ? '關於' + x.name : esc(x.label[key]);
   const body = { about: () => aboutSec(x, 'page'), menu: () => menuSec(x, 'page'), interior: () => interiorSec(x, 'page'),
     news: () => newsSec(x, 'page'), faq: () => faqSec(x, 'page'), visit: () => visitSec(x, 'page') }[key];
-  return [pageHead(x, title), body()];
+  return [pageHead(x, title, key), body(), key === 'visit' ? '' : contactStrip(x)];
 }
 
 // 區塊交替底色、捲動進場動態（首屏不套用，避免拖慢 LCP）
