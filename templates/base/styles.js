@@ -49,6 +49,8 @@ h1{font-size:clamp(38px,6.4vw,60px);letter-spacing:.02em}
 .hero.full .btn.ghost{color:#fff;border-color:rgba(255,255,255,.85)}
 .page-head{padding:72px 0 8px}
 .page-head+section{padding-top:40px}
+.page-head .lead{max-width:40em;font-size:17px}
+.page-head .hero-grid figure{margin:0}
 .about p,.visit-text p{margin:0 0 14px;max-width:46em}
 .split-grid{display:grid;gap:32px;align-items:center}
 .split img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:20px}
@@ -59,6 +61,11 @@ h1{font-size:clamp(38px,6.4vw,60px);letter-spacing:.02em}
 .menu{list-style:none;margin:0;padding:0;display:grid;gap:0 48px}
 .menu li{display:flex;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:1px dashed var(--line)}
 .menu .price{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--accent);font-weight:600}
+.price-table{width:100%;max-width:720px;border-collapse:collapse}
+.price-table th,.price-table td{text-align:left;padding:14px 0;border-bottom:1px dashed var(--line);font-weight:400}
+.price-table thead th{color:var(--muted);font-size:14px;border-bottom:1px solid var(--line)}
+.price-table td,.price-table thead th:last-child{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.price-table td{color:var(--accent);font-weight:600}
 .note{color:var(--muted);font-size:14px;margin-top:14px}
 .gallery{columns:2 140px;column-gap:14px}
 .gallery figure{break-inside:avoid;margin-bottom:14px;overflow:hidden;border-radius:16px;background:var(--surface)}

@@ -58,7 +58,8 @@ export function buildDescription(content, tpl) {
 export function pageTitle(content, tpl, page) {
   if (!page || page.key === 'home') return buildTitle(content, tpl);
   const name = content.name || '你的店名';
-  return clip((page.key === 'about' ? '關於' + name : page.label + '｜' + name), 60);
+  const where = regionLabel(content) + tpl.kindLabel;   // 例如「苓雅區咖啡店」，讓子頁標題也帶地區與行業
+  return clip((page.key === 'about' ? '關於' + name : page.label + '｜' + name) + '｜' + where, 60);
 }
 
 const joinFit = (items, max) => { let out = ''; for (const it of items) { const next = out ? out + '、' + it : it; if (len(next) > max) break; out = next; } return out; };
@@ -121,7 +122,7 @@ export function buildFaqLd(model) {
   return {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: faq.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }))
+    mainEntity: (model.faqOnPage === 'teaser' ? faq.slice(0, model.faqTeaser || 3) : faq).map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }))
   };
 }
 
@@ -146,8 +147,8 @@ export function buildHead(model) {
   const title = model.title, desc = model.description;
   const hero = model.heroFile ? absUrl(siteUrl, model.heroFile) : '';
   const url = model.pageUrl || siteUrl;
-  const businessHere = !model.pageInfo || ['home', 'visit'].includes(model.pageInfo.key);
-  const lds = [businessHere ? buildBusinessLd(model) : null, buildFaqLd(model), buildBreadcrumbLd(model)].filter(Boolean);
+  // 店家資料每頁都放（同一個 @id），搜尋與 AI 從任何一頁進來都能對應到同一家店
+  const lds = [buildBusinessLd(model), buildFaqLd(model), buildBreadcrumbLd(model)].filter(Boolean);
   const h = [];
   h.push('<meta charset="utf-8">');
   h.push('<meta name="viewport" content="width=device-width, initial-scale=1">');

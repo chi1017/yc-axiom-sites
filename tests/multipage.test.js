@@ -71,13 +71,22 @@ test('multi: nav marks the current page; home teasers link to their pages', () =
   assert.ok(more.includes('about/') && more.includes('menu/') && more.includes('visit/'), more.join(','));
 });
 
-test('multi: structured data on the right pages (business on home + visit, FAQ only on faq, breadcrumbs on subpages)', () => {
+test('multi: structured data on the right pages (business on every page, FAQ on faq page + top questions on home, breadcrumbs on subpages)', () => {
   const { files } = multi();
   const types = (f) => [...parseHTML(files[f]).document.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent)['@type']);
-  assert.deepEqual(types('index.html'), ['CafeOrCoffeeShop']);
+  assert.deepEqual(types('index.html'), ['CafeOrCoffeeShop', 'FAQPage']);
+  // 首頁的 FAQPage 題數與畫面上顯示的題數一致（前 3 題），常見問題頁是全部
+  const { document: home } = parseHTML(files['index.html']);
+  const homeLd = [...home.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent)).find((l) => l['@type'] === 'FAQPage');
+  assert.equal(homeLd.mainEntity.length, home.querySelectorAll('.faq-item').length);
+  assert.equal(homeLd.mainEntity.length, Math.min(3, sample.content.faq.length));
+  const faqLd = [...parseHTML(files['faq/index.html']).document.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent)).find((l) => l['@type'] === 'FAQPage');
+  assert.equal(faqLd.mainEntity.length, sample.content.faq.length);
+  // 首頁保留完整介紹
+  assert.ok(home.querySelector('#about').textContent.includes(sample.content.intro.split('\n')[0].slice(0, 20)));
   assert.deepEqual(types('visit/index.html'), ['CafeOrCoffeeShop', 'BreadcrumbList']);
-  assert.deepEqual(types('faq/index.html'), ['FAQPage', 'BreadcrumbList']);
-  assert.deepEqual(types('menu/index.html'), ['BreadcrumbList']);
+  assert.deepEqual(types('faq/index.html'), ['CafeOrCoffeeShop', 'FAQPage', 'BreadcrumbList']);
+  assert.deepEqual(types('menu/index.html'), ['CafeOrCoffeeShop', 'BreadcrumbList']);
 });
 
 test('multi: sitemap lists every page, llms.txt lists page links', () => {
