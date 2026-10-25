@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { buildSite, imagePlan } from '../templates/shared/site.js';
 import { normalizeContent, normalizePalette, normalizeSections } from '../templates/shared/content.js';
 import { validateForPublish } from '../templates/shared/validate.js';
+import { normalizeLayout, normalizePages, pagesFromSections } from '../templates/shared/pages.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './lib/images.mjs';
 import { buildMaintenancePage, shopContact } from '../templates/shared/maintenance.js';
 import { buildClosedPage } from '../templates/shared/closed.js';
@@ -38,7 +39,10 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     if (!ver) throw new Error('找不到版本 ' + vid);
 
     const content = normalizeContent(ver.content), palette = normalizePalette(ver.palette), sections = normalizeSections(ver.sections);
-    const check = validateForPublish(content, sections, site.slug);
+    const check = validateForPublish(content, sections, site.slug, undefined, { template: site.template });
+    // 版型：網站已升級成多頁時，舊的一頁版本也用多頁輸出（頁面勾選沿用當時的區塊開關），網站不會因還原舊版而退回一頁
+    const layout = normalizeLayout(site.layout) === 'multi' ? 'multi' : normalizeLayout(ver.layout);
+    const pages = layout === 'multi' ? (normalizeLayout(ver.layout) === 'multi' ? normalizePages(ver.pages) : pagesFromSections(ver.sections)) : undefined;
     if (!check.ok) throw new Error('內容未通過檢查：' + check.errors.map((e) => e.msg).join('、'));
 
     const project = await cf.ensureProject(site.cf_project_name || site.slug);
@@ -47,10 +51,10 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     const siteUrl = 'https://' + (useCustom ? site.custom_domain : project.subdomain) + '/';
     log('Cloudflare 專案：' + project.name + (project.created ? '（新建立）' : '') + ' → ' + siteUrl);
 
-    const built = buildSite({ template: site.template, content, palette, sections, siteUrl, lastmod: now().toISOString().slice(0, 10) });
+    const built = buildSite({ template: site.template, content, palette, sections, layout, pages, siteUrl, lastmod: now().toISOString().slice(0, 10) });
     rmSync(outDir, { recursive: true, force: true });
     mkdirSync(outDir, { recursive: true });
-    for (const [f, c] of Object.entries(built.files)) writeFileSync(join(outDir, f), c);
+    for (const [f, c] of Object.entries(built.files)) { mkdirSync(dirname(join(outDir, f)), { recursive: true }); writeFileSync(join(outDir, f), c); }
     writeFileSync(join(outDir, '_headers'), HEADERS_FILE);
 
     for (const img of imagePlan(content)) {
@@ -69,7 +73,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
       cf_project_name: project.name, public_url: siteUrl, live_version_id: vid, last_published_at: ts,
       ...(site.first_published_at ? {} : { first_published_at: ts })
     });
-    await event('deploy_ok', { url: siteUrl, version_id: vid, seconds: Math.round((Date.now() - t0) / 1000) });
+    await event('deploy_ok', { url: siteUrl, version_id: vid, layout, pages: built.pages.length, seconds: Math.round((Date.now() - t0) / 1000) });
     log('部署完成：' + siteUrl);
     await notifyGoLive({ site, content, siteUrl, db, sendMail, event, log, now });
     return { ok: true, url: siteUrl };

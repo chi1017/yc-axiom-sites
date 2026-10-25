@@ -1,7 +1,7 @@
 import { esc, jsonForScript, len, clip } from './escape.js';
 import { hoursSummary, openingHoursSpec } from './hours.js';
 import { parseAddress } from './region.js';
-import { liveMenu, liveFaq } from './content.js';
+import { liveMenu, liveFaq, liveNews } from './content.js';
 
 const MIN_DESC = 80, MAX_DESC = 160;
 
@@ -38,10 +38,10 @@ export function buildDescription(content, tpl) {
   const candidates = [
     hs && len(hs) <= 60 ? '營業時間：' + hs + '。' : '',
     firstSentence(content.intro, 50),
-    menu.length ? '菜單有' + menu.join('、') + '等。' : '',
-    '網站提供地址、電話' + (content.booking.url ? '與線上訂位' : '') + '等來店資訊。'
+    menu.length ? tpl.offer.provide + menu.join('、') + '等' + tpl.offer.item + '。' : '',
+    '網站提供地址、電話' + (content.booking.url ? '與線上預約' : '') + '等' + tpl.visit.label + '。'
   ];
-  const fillers = ['歡迎來店坐坐，查看完整營業時間與交通資訊。', '想了解更多，歡迎直接來電或到店詢問。', '網站上整理了地址、電話與營業時間，方便你規劃行程。', '來訪前建議先確認營業時間，讓你的行程更順利。'];
+  const fillers = ['歡迎來訪，網站上有完整的營業時間與交通資訊。', '想了解更多，歡迎直接來電或到店詢問。', '網站上整理了地址、電話與營業時間，方便你規劃行程。', '來訪前建議先確認營業時間，讓你的行程更順利。'];
   let out = parts.join('');
   for (const c of candidates) {
     if (c && len(out) + len(c) <= MAX_DESC) out += c;
@@ -50,6 +50,34 @@ export function buildDescription(content, tpl) {
     if (len(out) >= MIN_DESC) break;
     if (len(out) + len(f) <= MAX_DESC) out += f;
   }
+  if (len(out) > MAX_DESC) out = clip(out, MAX_DESC - 1) + '…';
+  return out;
+}
+
+// 多頁版子頁的標題：「頁名｜店名」；首頁沿用 buildTitle
+export function pageTitle(content, tpl, page) {
+  if (!page || page.key === 'home') return buildTitle(content, tpl);
+  const name = content.name || '你的店名';
+  return clip((page.key === 'about' ? '關於' + name : page.label + '｜' + name), 60);
+}
+
+const joinFit = (items, max) => { let out = ''; for (const it of items) { const next = out ? out + '、' + it : it; if (len(next) > max) break; out = next; } return out; };
+
+// 多頁版子頁的描述：先放這一頁的重點，不足 80 字再補首頁描述，最多 160 字
+export function pageDescription(content, tpl, page) {
+  const home = buildDescription(content, tpl);
+  if (!page || page.key === 'home') return home;
+  const name = content.name || '本店';
+  const hs = hoursSummary(content.hours);
+  let lead = '';
+  if (page.key === 'about') lead = firstSentence(content.intro, 90) ? name + '：' + firstSentence(content.intro, 90) : '認識' + name + '。';
+  else if (page.key === 'menu') { const m = joinFit(liveMenu(content).map((i) => i.name + (i.price != null ? ' NT$' + i.price : '')), 90); lead = name + '的' + page.label + (m ? '：' + m + '。' : '。'); }
+  else if (page.key === 'interior') lead = name + '的' + page.label + '，用照片看看實際的樣子。';
+  else if (page.key === 'news') { const n = joinFit(liveNews(content).map((i) => i.title), 90); lead = name + '最新消息' + (n ? '：' + n + '。' : '。'); }
+  else if (page.key === 'faq') { const f = joinFit(liveFaq(content).map((i) => i.q.replace(/[？?]$/, '')), 90); lead = name + '常見問題' + (f ? '：' + f + '？' : '。'); }
+  else if (page.key === 'visit') lead = name + page.label + '：' + (content.address ? '地址' + content.address + '。' : '') + (hs && len(hs) <= 60 ? '營業時間' + hs + '。' : '') + (content.phone ? '電話 ' + content.phone + '。' : '');
+  let out = lead;
+  if (len(out) < MIN_DESC) out += home;
   if (len(out) > MAX_DESC) out = clip(out, MAX_DESC - 1) + '…';
   return out;
 }
@@ -89,7 +117,7 @@ export function buildBusinessLd(model) {
 
 export function buildFaqLd(model) {
   const faq = liveFaq(model.content);
-  if (!faq.length || !model.show.faq) return null;
+  if (!faq.length || !model.show.faq || model.faqOnPage === false) return null;
   return {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
@@ -97,29 +125,43 @@ export function buildFaqLd(model) {
   };
 }
 
+export function buildBreadcrumbLd(model) {
+  if (!model.pageUrl || !model.pageInfo || model.pageInfo.key === 'home') return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: model.content.name || '首頁', item: model.siteUrl },
+      { '@type': 'ListItem', position: 2, name: model.pageInfo.label, item: model.pageUrl }
+    ]
+  };
+}
+
 const FAVICON = (color) => 'data:image/svg+xml,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="' + color + '"/><path d="M18 24h24v14a10 10 0 0 1-10 10h-4a10 10 0 0 1-10-10zM42 27h4a5 5 0 0 1 0 10h-4" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>');
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="' + color + '"/><circle cx="32" cy="32" r="12" fill="none" stroke="#fff" stroke-width="4"/></svg>');
 
 // <head> 內容。preview 不輸出 canonical / OG / JSON-LD 以外的追蹤，但仍輸出 meta 讓預覽盡量接近成品。
 export function buildHead(model) {
   const { content: c, tpl, siteUrl, colors } = model;
   const title = model.title, desc = model.description;
   const hero = model.heroFile ? absUrl(siteUrl, model.heroFile) : '';
-  const lds = [buildBusinessLd(model), buildFaqLd(model)].filter(Boolean);
+  const url = model.pageUrl || siteUrl;
+  const businessHere = !model.pageInfo || ['home', 'visit'].includes(model.pageInfo.key);
+  const lds = [businessHere ? buildBusinessLd(model) : null, buildFaqLd(model), buildBreadcrumbLd(model)].filter(Boolean);
   const h = [];
   h.push('<meta charset="utf-8">');
   h.push('<meta name="viewport" content="width=device-width, initial-scale=1">');
   h.push('<title>' + esc(title) + '</title>');
   h.push('<meta name="description" content="' + esc(desc) + '">');
   h.push('<meta name="robots" content="index, follow, max-image-preview:large">');
-  h.push('<link rel="canonical" href="' + esc(siteUrl) + '">');
+  h.push('<link rel="canonical" href="' + esc(url) + '">');
   h.push('<meta name="theme-color" content="' + esc(colors.bg) + '">');
   h.push('<link rel="icon" href="' + FAVICON(colors.accent) + '">');
   h.push('<meta property="og:type" content="website">');
   h.push('<meta property="og:site_name" content="' + esc(c.name) + '">');
   h.push('<meta property="og:title" content="' + esc(title) + '">');
   h.push('<meta property="og:description" content="' + esc(desc) + '">');
-  h.push('<meta property="og:url" content="' + esc(siteUrl) + '">');
+  h.push('<meta property="og:url" content="' + esc(url) + '">');
   h.push('<meta property="og:locale" content="zh_TW">');
   if (hero) h.push('<meta property="og:image" content="' + esc(hero) + '">');
   h.push('<meta name="twitter:card" content="' + (hero ? 'summary_large_image' : 'summary') + '">');
@@ -142,8 +184,10 @@ export function robotsTxt(siteUrl) {
   ].join('\n');
 }
 
-export function sitemapXml(siteUrl, lastmod) {
-  return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>' + esc(siteUrl) + '</loc><lastmod>' + esc(lastmod) + '</lastmod></url>\n</urlset>\n';
+// paths：要列出的頁面（相對網址，首頁為 ''）；省略時只有首頁
+export function sitemapXml(siteUrl, lastmod, paths = ['']) {
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    paths.map((p) => '  <url><loc>' + esc(absUrl(siteUrl, p)) + '</loc><lastmod>' + esc(lastmod) + '</lastmod></url>\n').join('') + '</urlset>\n';
 }
 
 export function llmsTxt(model) {
@@ -157,8 +201,12 @@ export function llmsTxt(model) {
   if (c.booking.url) L.push('- ' + (c.booking.label || '線上訂位') + '：' + c.booking.url);
   const menu = liveMenu(c);
   if (menu.length && model.show.menu) {
-    L.push('', '## 菜單', '');
+    L.push('', '## ' + tpl.offer.label, '');
     menu.forEach((m) => L.push('- ' + m.name + (m.price != null ? '：NT$ ' + m.price : '')));
+  }
+  if (model.pageLinks && model.pageLinks.length > 1) {
+    L.push('', '## 網站頁面', '');
+    model.pageLinks.forEach((p) => L.push('- [' + p.label + '](' + absUrl(siteUrl, p.path) + ')'));
   }
   L.push('');
   return L.join('\n');

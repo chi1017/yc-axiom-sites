@@ -6,10 +6,11 @@ export const LIMITS = {
   name: 40, tagline: 60, intro: 600, address: 120, phone: 24, hoursNote: 80,
   bookingLabel: 12, menu: 12, menuName: 40, price: 99999,
   faq: 8, faqQ: 60, faqA: 300, news: 6, newsTitle: 60,
-  room: 3, alt: 60, social: 200
+  room: 6, alt: 60, social: 200
 };
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
+export const HERO_STYLES = ['card', 'full'];
 export const SECTION_KEYS = ['menu', 'interior', 'faq', 'news'];
 export const SECTION_LABELS = { menu: '菜單', interior: '店內環境', faq: '常見問題', news: '最新消息' };
 
@@ -25,6 +26,7 @@ export function emptyContent() {
     hours: emptyHours(), hoursNote: '',
     booking: { label: '', url: '' },
     photos: { hero: null, room: [] },
+    heroStyle: 'card',
     menu: [], faq: [], news: []
   };
 }
@@ -87,6 +89,8 @@ export function normalizeContent(raw) {
   const ph = r.photos && typeof r.photos === 'object' ? r.photos : {};
   c.photos.hero = photo(ph.hero);
   c.photos.room = arr(ph.room).map(photo).filter(Boolean).slice(0, LIMITS.room);
+  // 主視覺樣式：card＝右側圓角照片（原本的樣式，舊網站預設）；full＝滿版大圖疊字
+  c.heroStyle = HERO_STYLES.includes(r.heroStyle) ? r.heroStyle : 'card';
 
   c.menu = arr(r.menu).slice(0, LIMITS.menu).map((m) => {
     const o = m && typeof m === 'object' ? m : {};

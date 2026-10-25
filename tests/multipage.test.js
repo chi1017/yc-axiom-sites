@@ -1,0 +1,125 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { posix } from 'node:path';
+import { parseHTML } from 'linkedom';
+import { buildSite } from '../templates/shared/site.js';
+import { INDUSTRIES } from '../templates/shared/industries.js';
+
+const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', import.meta.url)));
+const URL_ = 'https://wuhou-cafe.pages.dev/';
+const build = (over = {}) => buildSite({ template: 'cafe', siteUrl: URL_, ...sample, lastmod: '2026-10-25', ...over });
+const multi = (over = {}) => build({ layout: 'multi', ...over });
+const htmlFiles = (files) => Object.entries(files).filter(([f]) => f.endsWith('.html'));
+const BRAND = /yc[ _-]?axiom|ycaxiom|chi1017|788cblaq|generator|powered by/i;
+
+test('multi: one file per enabled page, single: only the home page', () => {
+  assert.deepEqual(htmlFiles(build().files).map(([f]) => f), ['index.html']);
+  assert.deepEqual(htmlFiles(multi().files).map(([f]) => f).sort(),
+    ['about/index.html', 'faq/index.html', 'index.html', 'menu/index.html', 'news/index.html', 'space/index.html', 'visit/index.html']);
+  const some = multi({ pages: { menu: false, faq: false } });
+  assert.deepEqual(htmlFiles(some.files).map(([f]) => f).sort(), ['about/index.html', 'index.html', 'news/index.html', 'space/index.html', 'visit/index.html']);
+});
+
+test('multi: pages with nothing to show are not built (no empty pages)', () => {
+  const c = JSON.parse(JSON.stringify(sample.content));
+  c.menu = []; c.faq = []; c.news = []; c.photos.room = [];
+  assert.deepEqual(htmlFiles(multi({ content: c }).files).map(([f]) => f).sort(), ['about/index.html', 'index.html', 'visit/index.html']);
+});
+
+test('multi: every page has one h1, its own canonical, title and 80–160 description; titles are unique', () => {
+  const { files } = multi();
+  const titles = new Set();
+  for (const [f, html] of htmlFiles(files)) {
+    const { document: d } = parseHTML(html);
+    assert.equal(d.querySelectorAll('h1').length, 1, f);
+    const path = f.replace(/index\.html$/, '');
+    assert.equal(d.querySelector('link[rel=canonical]').getAttribute('href'), URL_ + path, f);
+    assert.equal(d.querySelector('meta[property="og:url"]').getAttribute('content'), URL_ + path, f);
+    const desc = d.querySelector('meta[name=description]').getAttribute('content');
+    assert.ok([...desc].length >= 80 && [...desc].length <= 160, f + ' desc ' + [...desc].length);
+    titles.add(d.querySelector('title').textContent);
+    // 標題階層不跳級
+    let last = 1;
+    d.querySelectorAll('h1,h2,h3').forEach((h) => { const n = Number(h.tagName[1]); assert.ok(n <= last + 1, f + ' heading skip ' + h.tagName); last = n; });
+  }
+  assert.equal(titles.size, htmlFiles(files).length);
+});
+
+test('multi: every internal link and image resolves to a built file', () => {
+  const { files } = multi();
+  const exists = (p) => p in files || (p.endsWith('/') && (p + 'index.html') in files) || p === '' || /^images\//.test(p);
+  for (const [f, html] of htmlFiles(files)) {
+    const { document: d } = parseHTML(html);
+    const dir = posix.dirname(f) === '.' ? '' : posix.dirname(f) + '/';
+    for (const a of d.querySelectorAll('a[href]')) {
+      const h = a.getAttribute('href');
+      if (/^(https?:|tel:|mailto:|#)/.test(h)) continue;
+      const target = posix.normalize(dir + h).replace(/^\.\/?/, '');
+      assert.ok(exists(target === '.' ? '' : target), f + ' → ' + h);
+    }
+    for (const i of d.querySelectorAll('img')) assert.match(posix.normalize(dir + i.getAttribute('src')), /^images\/(hero|room-\d)\.webp$/, f);
+  }
+});
+
+test('multi: nav marks the current page; home teasers link to their pages', () => {
+  const { files } = multi();
+  const { document: menu } = parseHTML(files['menu/index.html']);
+  assert.equal(menu.querySelector('nav#site-nav a[aria-current=page]').textContent, '菜單與價格');
+  const { document: home } = parseHTML(files['index.html']);
+  const more = [...home.querySelectorAll('.more a')].map((a) => a.getAttribute('href'));
+  assert.ok(more.includes('about/') && more.includes('menu/') && more.includes('visit/'), more.join(','));
+});
+
+test('multi: structured data on the right pages (business on home + visit, FAQ only on faq, breadcrumbs on subpages)', () => {
+  const { files } = multi();
+  const types = (f) => [...parseHTML(files[f]).document.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent)['@type']);
+  assert.deepEqual(types('index.html'), ['CafeOrCoffeeShop']);
+  assert.deepEqual(types('visit/index.html'), ['CafeOrCoffeeShop', 'BreadcrumbList']);
+  assert.deepEqual(types('faq/index.html'), ['FAQPage', 'BreadcrumbList']);
+  assert.deepEqual(types('menu/index.html'), ['BreadcrumbList']);
+});
+
+test('multi: sitemap lists every page, llms.txt lists page links', () => {
+  const { files } = multi();
+  for (const [f] of htmlFiles(files)) assert.ok(files['sitemap.xml'].includes('<loc>' + URL_ + f.replace(/index\.html$/, '') + '</loc>'), f);
+  assert.ok(files['llms.txt'].includes('## 網站頁面') && files['llms.txt'].includes(URL_ + 'menu/'));
+  assert.ok(!build().files['llms.txt'].includes('## 網站頁面'));
+});
+
+test('every industry renders single and multi with its own wording, schema type and no platform brand', () => {
+  for (const ind of INDUSTRIES) {
+    for (const layout of ['single', 'multi']) {
+      const { files } = build({ template: ind.key, layout });
+      for (const [f, c] of Object.entries(files)) assert.ok(!BRAND.test(c), ind.key + ' ' + f);
+      const home = files['index.html'];
+      const { document: d } = parseHTML(home);
+      assert.ok(d.querySelector('.kicker').textContent.includes(ind.kindLabel), ind.key);
+      assert.equal(JSON.parse(d.querySelector('script[type="application/ld+json"]').textContent)['@type'], ind.schemaType, ind.key);
+      if (layout === 'multi') {
+        assert.ok((ind.offer.path + 'index.html') in files, ind.key + ' offer page');
+        assert.ok(parseHTML(files[ind.offer.path + 'index.html']).document.querySelector('h1').textContent === ind.offer.label, ind.key);
+      }
+      if (ind.offer.label !== '菜單與價格') assert.ok(!home.includes('菜單與價格') && !home.includes('看完整菜單'), ind.key + ' leaks cafe wording');
+    }
+  }
+});
+
+test('hero: full-bleed style, falls back to the card style without a photo; old content keeps the card', () => {
+  const c = JSON.parse(JSON.stringify(sample.content));
+  assert.ok(build().html.includes('<section class="hero" id="top">'));
+  c.heroStyle = 'full';
+  assert.ok(build({ content: c }).html.includes('<section class="hero full" id="top">'));
+  c.photos.hero = null;
+  assert.ok(!build({ content: c }).html.includes('hero full'));
+  c.heroStyle = 'weird';
+  assert.ok(build({ content: c }).html.includes('<section class="hero" id="top">'));
+});
+
+test('preview: renders the requested page with the given image URLs and placeholders', () => {
+  const r = buildSite({ template: 'salon', siteUrl: URL_, ...sample, layout: 'multi', page: 'menu', preview: true, imageSrc: (role, p) => 'https://x.supabase.co/' + p.path });
+  const { document: d } = parseHTML(r.html);
+  assert.equal(d.querySelector('h1').textContent, '服務與價格');
+  assert.equal(r.files, undefined);
+  assert.deepEqual(r.pages.map((p) => p.key), ['home', 'about', 'menu', 'interior', 'news', 'faq', 'visit']);
+});

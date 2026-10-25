@@ -48,3 +48,34 @@ test('SQL allowed page keys match pages.js', () => {
   assert.ok(m, 'page key list found in 010');
   assert.deepEqual([...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]), PAGE_KEYS);
 });
+
+// ── 行業（通用版型）──
+import { INDUSTRIES, INDUSTRY_KEYS, INDUSTRY_KEY_RE, getIndustry } from '../templates/shared/industries.js';
+import { pagesFor } from '../templates/shared/pages.js';
+
+test('industries: unique keys in DB format, complete wording, official demo industries covered', () => {
+  assert.equal(new Set(INDUSTRY_KEYS).size, INDUSTRY_KEYS.length);
+  for (const i of INDUSTRIES) {
+    assert.match(i.key, INDUSTRY_KEY_RE, i.key);
+    assert.ok(i.label && i.schemaType && i.offer.label && i.offer.path && i.space.label && i.visit.label, i.key);
+  }
+  for (const k of ['bakery', 'cafe', 'car-detailing', 'drink', 'edu', 'fashion', 'furniture', 'kindergarten', 'medical', 'pet', 'salon']) assert.ok(getIndustry(k), k);
+  assert.equal(getIndustry('nope'), null);
+});
+
+test('SQL template format check matches INDUSTRY_KEY_RE', () => {
+  const sql = readFileSync(new URL('../supabase/migrations/011_industries.sql', import.meta.url), 'utf8');
+  const m = sql.match(/template ~ '([^']+)'/);
+  assert.ok(m); assert.equal(m[1], INDUSTRY_KEY_RE.source);
+});
+
+test('pagesFor: industry renames offer / photo / visit pages, keys stay the same, paths unique', () => {
+  const salon = pagesFor('salon');
+  assert.deepEqual(salon.map((p) => p.key), PAGE_KEYS);
+  assert.equal(salon.find((p) => p.key === 'menu').label, '服務與價格');
+  assert.equal(salon.find((p) => p.key === 'menu').path, 'services/');
+  assert.equal(pagesFor('interior').find((p) => p.key === 'interior').path, 'works/');
+  assert.equal(pagesFor('law').find((p) => p.key === 'visit').path, 'contact/');
+  for (const i of INDUSTRIES) { const ps = pagesFor(i.key).map((p) => p.path); assert.equal(new Set(ps).size, ps.length, i.key); }
+  assert.deepEqual(pagesFor('unknown'), PAGES);
+});

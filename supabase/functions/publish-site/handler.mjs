@@ -1,6 +1,7 @@
 // 發佈網站的 Edge Function 邏輯。所有外部依賴由 deps 注入，方便在 Node 內測試。
 import { normalizeContent, normalizePalette, normalizeSections } from '../../../templates/shared/content.js';
 import { validateForPublish } from '../../../templates/shared/validate.js';
+import { normalizeLayout, normalizePages } from '../../../templates/shared/pages.js';
 import { adminFirstPublish } from '../_shared/emails.mjs';
 
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
@@ -51,7 +52,7 @@ export async function handlePublish(req, deps) {
 
   // 以資料庫裡的草稿為準（不相信瀏覽器送來的內容）
   const content = normalizeContent(site.content), palette = normalizePalette(site.palette), sections = normalizeSections(site.sections);
-  const check = validateForPublish(content, sections, site.slug, site.content, { checkBrand: site.status === 'draft' });
+  const check = validateForPublish(content, sections, site.slug, site.content, { checkBrand: site.status === 'draft', template: site.template });
   if (!check.ok) return reply({ error: 'validation', message: '還有必填項目沒完成', errors: check.errors }, 422);
 
   // 頻率限制：兩次發佈至少間隔 20 秒；24 小時內最多 30 次
@@ -60,7 +61,7 @@ export async function handlePublish(req, deps) {
   if (recent.length && now.getTime() - new Date(recent[0].created_at).getTime() < MIN_GAP_SECONDS * 1000) return reply({ error: 'rate_limited', message: '操作太頻繁，請稍候幾秒再試' }, 429);
   if (recent.length >= MAX_PER_DAY) return reply({ error: 'rate_limited', message: '今天的發佈次數已達上限，請明天再試' }, 429);
 
-  const version = await db.insertReturning('site_versions', { site_id: siteId, content, palette, sections });
+  const version = await db.insertReturning('site_versions', { site_id: siteId, content, palette, sections, layout: normalizeLayout(site.layout), pages: normalizePages(site.pages) });
   if (!version || !version.id) return reply({ error: 'server_error', message: '儲存版本失敗，請稍後再試' }, 500);
   const event = (type, detail) => db.insert('site_events', { site_id: siteId, type, detail }).catch(() => {});
 

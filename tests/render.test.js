@@ -8,6 +8,14 @@ import { parseHTML } from 'linkedom';
 
 const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', import.meta.url)));
 const URL_ = 'https://wuhou-cafe.pages.dev/';
+// 客戶網站只允許版型自己的一段內嵌程式（手機選單、進場動態）：沒有外部腳本、沒有 on* 屬性、內容固定不含客戶資料
+function assertOnlyOwnScript(d) {
+  const js = [...d.querySelectorAll('script:not([type="application/ld+json"])')];
+  assert.equal(js.length, 1, 'exactly one inline script');
+  assert.ok(!js[0].getAttribute('src'));
+  assert.ok(js[0].textContent.includes('IntersectionObserver') && js[0].textContent.length < 1500);
+  assert.equal([...d.querySelectorAll('*')].filter((e) => [...e.attributes].some((a) => /^on/i.test(a.name))).length, 0, 'no inline event handlers');
+}
 const live = (over = {}) => buildSite({ template: 'cafe', siteUrl: URL_, ...sample, ...over });
 const prev = (over = {}) => buildSite({ template: 'cafe', siteUrl: URL_, preview: true, imageSrc: (r, p) => 'https://x.supabase.co/' + p.path, ...sample, ...over });
 
@@ -18,7 +26,7 @@ test('live build: structure, one h1, headings do not skip', () => {
   assert.equal(d.querySelector('h1').textContent, '午後日光咖啡');
   assert.equal(d.documentElement.getAttribute('lang'), 'zh-Hant');
   assert.ok(d.querySelectorAll('h2').length >= 5);
-  assert.equal(d.querySelectorAll('script:not([type="application/ld+json"])').length, 0, 'no client-side JS');
+  assertOnlyOwnScript(d);
   assert.equal(d.querySelector('link[rel=canonical]').getAttribute('href'), URL_);
   assert.ok(!html.includes('網站設計') && !html.includes('YC AXIOM') && !html.includes('yc-axiom-site'), 'no designer credit in customer site');
 });
@@ -42,7 +50,7 @@ test('live build never shows placeholders even with empty optional content', () 
 });
 test('preview shows hints for empty fields', () => {
   const { html } = prev({ content: emptyContent() });
-  for (const h of ['[店名]', '[價格]', '[你的回答]', '[你的問題]', '[品名]', '[主視覺照片]', '[訂位按鈕]']) assert.ok(html.includes(h), h);
+  for (const h of ['[店名]', '[價格]', '[你的回答]', '[你的問題]', '[品項名稱]', '[主視覺照片]', '[訂位按鈕]']) assert.ok(html.includes(h), h);
 });
 test('section toggles hide sections', () => {
   const { document: d } = parseHTML(live({ sections: { menu: false, interior: false, faq: false, news: false } }).html);
@@ -56,7 +64,7 @@ test('XSS: hostile content is escaped everywhere', () => {
   c.menu[0].name = evil; c.faq[0].q = evil; c.faq[0].a = evil; c.news[0].title = evil; c.booking.label = evil;
   const { html } = live({ content: c });
   const { document: d } = parseHTML(html);
-  assert.equal(d.querySelectorAll('script:not([type="application/ld+json"])').length, 0);
+  assertOnlyOwnScript(d);
   assert.equal([...d.querySelectorAll('img')].filter((i) => i.getAttribute('onerror')).length, 0);
   assert.ok(!/<img src=x/i.test(html));
   d.querySelectorAll('script[type="application/ld+json"]').forEach((s) => JSON.parse(s.textContent));

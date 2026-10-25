@@ -7,7 +7,8 @@ import { normalizeContent, emptyContent, normalizeSections, LIMITS } from '../te
 import { groupHours, hoursSummary, openingHoursSpec } from '../templates/shared/hours.js';
 import { validateForPublish, suggestions } from '../templates/shared/validate.js';
 import { buildDescription } from '../templates/shared/seo.js';
-import { cafe } from '../templates/cafe/index.js';
+import { getTemplate } from '../templates/shared/registry.js';
+const cafe = getTemplate('cafe');
 
 const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', import.meta.url)));
 

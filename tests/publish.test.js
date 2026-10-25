@@ -42,6 +42,8 @@ test('first publish: draft → pending, version saved, admin emailed, NO deploy'
   assert.equal(s.log.dispatches.length, 0);
   assert.deepEqual(s.log.patches[0].b, { status: 'pending' }); assert.ok(s.log.patches[0].q.includes('status=eq.draft'));
   assert.equal(s.log.versions[0].palette, 'ink');
+  assert.equal(s.log.versions[0].layout, 'single');
+  assert.equal(s.log.versions[0].pages.menu, true);
   assert.deepEqual(s.log.events.map((e) => e.type), ['published_first', 'email_sent']);
   assert.equal(s.log.mails[0].to, 'ycaxiom@gmail.com'); assert.ok(s.log.mails[0].subject.includes('午後日光咖啡')); assert.ok(s.log.mails[0].html.includes('builder/preview/?site=' + SID));
 });
@@ -120,4 +122,11 @@ test('brand slug: a draft must change it before first publish; already-published
   for (const status of ['pending', 'live', 'overdue']) {
     const r = await setup({ slug: 'yc-cafe', status }).call(); assert.equal(r.status, 200, status);
   }
+});
+
+test('publish stores the site layout and page choices in the version', async () => {
+  const s = setup(); s.deps.db.getOne = ((orig) => async (t, q) => { const r = await orig(t, q); return t === 'rental_sites' && r ? { ...r, layout: 'multi', pages: { faq: false, evil: true } } : r; })(s.deps.db.getOne);
+  const r = await s.call(); assert.equal(r.status, 200);
+  assert.equal(s.log.versions[0].layout, 'multi');
+  assert.deepEqual(s.log.versions[0].pages, { about: true, menu: true, interior: true, news: true, faq: false, visit: true });
 });
