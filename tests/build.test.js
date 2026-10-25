@@ -113,7 +113,7 @@ test('runBuild: real photos get 800px variants + srcset and the heading font; br
   assert.equal(r.ok, true);
   for (const f of ['images/hero-800.webp', 'images/room-3-800.webp', 'fonts/heading.woff2']) assert.ok(existsSync(join(out, f)), f);
   const html = readFileSync(join(out, 'index.html'), 'utf8');
-  assert.ok(html.includes('srcset="images/hero-800.webp 800w') && html.includes('@font-face'));
+  assert.ok(html.includes('srcset="images/hero-480.webp 480w, images/hero-800.webp 800w') && html.includes('@font-face'));
   // 測試用的假 WebP 無法縮圖 → 只用原圖、沒有 srcset，部署照常成功
   const out2 = join(mkdtempSync(join(tmpdir(), 'v-')), 'dist');
   const r2 = await runBuild({ siteId: SID, outDir: out2, db: fakeDb(), cf: fakeCf(), deploy: async () => {}, log: () => {} });

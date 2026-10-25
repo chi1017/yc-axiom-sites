@@ -19,11 +19,14 @@ export function effectiveSections(content, sections, preview) {
 function ext(path) { const m = String(path).match(/\.(webp|jpe?g|png)$/i); return m ? m[1].toLowerCase().replace('jpeg', 'jpg') : 'webp'; }
 
 // 部署包裡的圖片檔名（固定，與客戶上傳檔名無關）
-// small：手機用的小尺寸版本（寬 800px、WebP），建置時由原圖產生（build/lib/images.mjs makeSmall）
+// sizes：手機用的小尺寸版本（寬 480／800px、WebP），建置時由原圖產生（build/lib/images.mjs makeSmall）
+// small 是 800px 版本（相容舊程式）；480px 給手機上兩欄的照片牆用，檔案約 800px 版的三分之一
 export const SMALL_WIDTH = 800;
+export const VARIANT_WIDTHS = [480, 800];
 export function imagePlan(content) {
   const out = [];
-  const add = (role, p) => out.push({ role, file: 'images/' + role + '.' + ext(p.path), small: 'images/' + role + '-' + SMALL_WIDTH + '.webp', path: p.path, w: p.w || 0 });
+  const add = (role, p) => out.push({ role, file: 'images/' + role + '.' + ext(p.path), small: 'images/' + role + '-' + SMALL_WIDTH + '.webp',
+    variants: VARIANT_WIDTHS.map((w) => ({ w, file: 'images/' + role + '-' + w + '.webp' })), path: p.path, w: p.w || 0 });
   if (content.photos.hero) add('hero', content.photos.hero);
   content.photos.room.forEach((p, i) => add('room-' + (i + 1), p));
   return out;
@@ -77,7 +80,12 @@ export function buildSite(input) {
     const imageSrc = (role, photo) => (input.imageSrc ? input.imageSrc(role, photo, fileOf[role]) : (fileOf[role] ? up + fileOf[role] : ''));
     const href = (key) => (key === 'home' ? (up || './') : up + (pathOf[key] || ''));
     // srcset：原圖寬度大於 800 才提供小圖；寬度不明時當作 1600（編輯器上傳上限）
-    const srcsetOf = (role) => { const p = planOf[role]; if (!variants || !p) return ''; const w = p.w || 1600; return w > SMALL_WIDTH ? up + p.small + ' ' + SMALL_WIDTH + 'w, ' + up + p.file + ' ' + w + 'w' : ''; };
+    const srcsetOf = (role) => {
+      const p = planOf[role]; if (!variants || !p) return '';
+      const w = p.w || 1600;
+      const smaller = p.variants.filter((v) => v.w < w);
+      return smaller.length ? smaller.map((v) => up + v.file + ' ' + v.w + 'w').concat(up + p.file + ' ' + w + 'w').join(', ') : '';
+    };
     const model = {
       ...base, page: pg.key, pageInfo: multi ? pg : null, imageSrc, srcsetOf, href,
       pageUrl: absUrl(siteUrl, pg.path),

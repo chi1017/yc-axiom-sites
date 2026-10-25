@@ -63,7 +63,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
       images.push({ ...img, buf });
     }
     let variants = true;
-    try { for (const img of images) img.smallBuf = await makeSmall(img.buf); } catch (e) { variants = false; log('手機小圖產生失敗，改用原圖：' + e.message); }
+    try { for (const img of images) img.variantBufs = await Promise.all(img.variants.map((v) => makeSmall(img.buf, v.w))); } catch (e) { variants = false; log('手機小圖產生失敗，改用原圖：' + e.message); }
 
     const buildArgs = { template: site.template, content, palette, sections, layout, pages, siteUrl, imageVariants: variants, lastmod: now().toISOString().slice(0, 10) };
     let built = buildSite({ ...buildArgs, headingFont: true });
@@ -77,7 +77,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     for (const [f, c] of Object.entries(built.files)) put(f, c);
     if (fontBuf) put(HEADING_FONT_FILE, fontBuf);
     writeFileSync(join(outDir, '_headers'), HEADERS_FILE);
-    for (const img of images) { put(img.file, img.buf); if (variants) put(img.small, img.smallBuf); }
+    for (const img of images) { put(img.file, img.buf); if (variants) img.variants.forEach((v, i) => put(v.file, img.variantBufs[i])); }
 
     await deploy({ dir: outDir, project: project.name });
 
