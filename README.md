@@ -17,12 +17,13 @@ YC AXIOM「網站租用」系統的版型與建置腳本。**這個 repo 是公�
 
 | 路徑 | 內容 |
 | --- | --- |
-| `templates/shared/` | 共用模組：內容正規化 `content.js`、必填檢查 `validate.js`、營業時間 `hours.js`、SEO/JSON-LD `seo.js`、配色 `palettes.js`、slug 規則 `slug.js`、入口 `site.js` |
+| `templates/shared/` | 共用模組：內容正規化 `content.js`、必填檢查 `validate.js`、營業時間 `hours.js`、SEO/JSON-LD `seo.js`、配色 `palettes.js`、slug 規則 `slug.js`、一頁版／多頁版與可勾選頁面 `pages.js`、入口 `site.js` |
 | `templates/cafe/` | 咖啡店版型（`index.js` 輸出 HTML、`styles.js` 輸出 CSS、`sample.json` 範例內容） |
 | `build/` | 部署腳本：`build-site.mjs`（Actions 進入點）、`run.mjs`（流程）、`lib/`（Supabase、Cloudflare） |
 | `supabase/migrations/005_rental.sql` | 資料表、RLS、Storage 權限 |
 | `supabase/functions/publish-site/` | 發佈用 Edge Function（`dist/index.ts` 是可直接貼進 Supabase 的單一檔案） |
 | `supabase/migrations/007_rental_cron.sql`、`supabase/cron/` | 第三階段：排程記號欄位、月報、排程紀錄；`schedule_rental_cron.sql` 是 pg_cron 排程範本（要先填入專案代號與密碼，不進 repo） |
+| `supabase/migrations/010_layout_pages.sql` | 多頁租用版第一階段：`layout`（一頁／多頁）、`pages`（多頁要開哪些頁）、只能升級不能改回 |
 | `supabase/functions/rental-cron/` | 每日排程（到期提醒、逾期、自動暫停、暫停滿 30 天通知）與每週一管理員摘要 |
 | `build/monthly-report.mjs`、`build/cleanup-photos.mjs` | 每月 1 日的 SEO／GEO 月報與舊照片清理（`.github/workflows/monthly-report.yml`） |
 | `tests/`、`supabase/tests/` | Node 單元測試、資料庫權限測試 |
