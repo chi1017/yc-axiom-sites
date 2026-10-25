@@ -265,10 +265,26 @@ function render(m) {
     '<main id="main">\n' + finish(main) + '\n</main>\n' + footer + '\n' + SCRIPT + '\n</body>\n</html>\n';
 }
 
+// 404 頁：不存在的網址回傳真正的 404（避免「軟 404」被當成重複首頁收錄）。
+// 部署在網站根目錄，但可能從任何深度的網址顯示，所以連結一律用根目錄路徑。
+function renderNotFound(m) {
+  const c = m.content;
+  const name = c.name ? esc(c.name) : '';
+  const links = [['/', '回首頁'], ...m.pageList.filter((p) => p.key !== 'home').map((p) => ['/' + p.path, p.label])];
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    '<title>找不到這個頁面' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
+    '<style>' + baseCss(m.colors) + '</style>\n</head>\n<body>\n' +
+    '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
+    '<main id="main"><section class="page-head"><div class="wrap"><p class="kicker">404</p><h1>找不到這個頁面</h1>' +
+    '<p class="lead">網址可能打錯了，或這個頁面已經不存在。</p><p class="more">' +
+    links.map((l) => '<a href="' + esc(l[0]) + '">' + esc(l[1]) + '</a>').join('　') + '</p></div></section></main>\n' +
+    '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
+}
+
 // 依行業設定產生版型物件：版面與流程全行業共用，只有用詞與 schema.org 類型不同
 export function makeTemplate(industry) {
   return {
     id: industry.key, label: industry.label, kindLabel: industry.kindLabel, schemaType: industry.schemaType,
-    offer: industry.offer, space: industry.space, visit: industry.visit, render
+    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound
   };
 }
