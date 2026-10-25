@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runBuild } from '../build/run.mjs';
 import { makeCloudflare } from '../build/lib/cloudflare.mjs';
-import { buildMaintenancePage } from '../templates/shared/maintenance.js';
+import { buildMaintenancePage, shopContactHtml } from '../templates/shared/maintenance.js';
 
 const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', import.meta.url)));
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBPVP8 '), Buffer.alloc(40)]);
@@ -26,9 +26,26 @@ function fakeDb(siteOver = {}, { memberEmail = 'cust@example.com' } = {}) {
 const cf = (subdomain = 'wuhou-cafe-9x.pages.dev') => ({ ensureProject: async (name) => ({ name, subdomain, created: false }) });
 const run = (db, extra = {}) => runBuild({ siteId: SID, outDir: tmp(), db, cf: cf(), deploy: async () => {}, log: () => {}, now: () => new Date('2026-10-11T00:00:00Z'), ...extra });
 
-test('maintenance page: noindex, escaped shop name, fixed contact info, no customer content', () => {
-  const p = buildMaintenancePage({ shopName: '<script>alert(1)</script>咖啡' });
-  assert.ok(p.html.includes('noindex,nofollow') && p.html.includes('@788cblaq') && p.html.includes('ycaxiom@gmail.com'));
+// 只比對平台專屬字串（不用 /yc|axiom/：店名或 LINE ID 剛好含 yc，例如 @lucy，會誤判）
+const PLATFORM_RE = /yc[ _-]?axiom|788cblaq|ycaxiom@gmail\.com/i;
+
+test('shopContactHtml: phone needs a digit; LINE only from line.me / lin.ee', () => {
+  assert.equal(shopContactHtml({ phone: '+' }), '');
+  assert.equal(shopContactHtml({ phone: '  ( ) - ' }), '');
+  assert.ok(shopContactHtml({ phone: '+886 4 2222 3333' }).includes('tel:+886422223333'));
+  for (const ok of ['https://line.me/R/ti/p/@lucy', 'https://page.line.me/abc', 'https://lin.ee/AbCd'])
+    assert.ok(shopContactHtml({ line: ok }).includes('href="' + ok + '"'), ok);
+  for (const bad of ['https://evil.example/line.me', 'https://line.me.evil.example/', 'https://notline.me/x', 'http://line.me/x', '@shop'])
+    assert.equal(shopContactHtml({ line: bad }), '', bad);
+});
+
+test('maintenance page: noindex, escaped shop name, shop own contact only, no platform brand or contact, no customer content', () => {
+  const p = buildMaintenancePage({ shopName: '<script>alert(1)</script>咖啡', phone: '04-2222-3333', line: 'https://line.me/R/ti/p/@shop' });
+  assert.ok(p.html.includes('noindex,nofollow') && p.html.includes('tel:0422223333') && p.html.includes('https://line.me/R/ti/p/@shop'));
+  assert.ok(!PLATFORM_RE.test(p.html), 'no platform brand / contact');
+  assert.ok(p.html.includes('target="_blank" rel="noopener noreferrer"'));
+  assert.ok(!buildMaintenancePage({ shopName: '店', line: 'javascript:alert(1)' }).html.includes('javascript:'));
+  assert.ok(!buildMaintenancePage({ shopName: '店' }).html.includes('如需聯絡店家'));
   assert.ok(!p.html.includes('<script>') && p.html.includes('&lt;script&gt;'));
   assert.deepEqual(Object.keys(p.files).sort(), ['index.html', 'robots.txt']); assert.ok(!('sitemap.xml' in p.files));
   assert.ok(buildMaintenancePage().html.includes('網站維護中'));
@@ -41,6 +58,15 @@ test('maintenance mode: only suspended sites; deploys to the SAME project; keeps
   assert.ok(readFileSync(join(out, 'index.html'), 'utf8').includes('網站維護中')); assert.ok(readFileSync(join(out, '_headers'), 'utf8').includes('X-Robots-Tag: noindex'));
   assert.ok(!('live_version_id' in db.calls.patches[0].b) && !('public_url' in db.calls.patches[0].b)); assert.equal(mails, 0);
   assert.deepEqual(db.calls.events.at(-1).detail.mode, 'maintenance'); assert.equal(db.calls.events.at(-1).type, 'deploy_ok');
+});
+test('maintenance / closed mode: deployed page shows the shop phone and LINE from site.content', async () => {
+  const content = { name: '午後咖啡', phone: '04-2222-3333', social: { line: 'https://lin.ee/AbCd' } };
+  for (const [mode, status] of [['maintenance', 'suspended'], ['closed', 'cancelled']]) {
+    const out = tmp(); await runBuild({ siteId: SID, mode, outDir: out, db: fakeDb({ status, content }), cf: cf(), deploy: async () => {}, log: () => {}, now: () => new Date('2026-10-11T00:00:00Z') });
+    const html = readFileSync(join(out, 'index.html'), 'utf8');
+    assert.ok(html.includes('午後咖啡') && html.includes('tel:0422223333') && html.includes('https://lin.ee/AbCd'), mode);
+    assert.ok(!PLATFORM_RE.test(html), mode);
+  }
 });
 test('maintenance mode refuses non-suspended; normal mode refuses suspended; unknown mode refused', async () => {
   for (const status of ['live', 'overdue', 'pending', 'draft', 'cancelled']) {

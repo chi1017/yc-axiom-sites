@@ -103,3 +103,8 @@ test('custom palette renders with derived variables', async () => {
   const { html } = live({ palette: 'c-1f6f5c-l' });
   assert.ok(html.includes('--bg:' + d.bg) && html.includes('--accent:' + d.accent));
 });
+
+test('customer site output never contains the platform brand (name, domain, contact)', () => {
+  const out = live();
+  for (const [f, c] of Object.entries(out.files)) assert.ok(!/yc[ _-]?axiom|ycaxiom|chi1017|788cblaq|generator|powered by/i.test(String(c)), 'brand leak in ' + f);
+});
