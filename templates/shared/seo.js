@@ -65,19 +65,26 @@ export function pageTitle(content, tpl, page) {
 const joinFit = (items, max) => { let out = ''; for (const it of items) { const next = out ? out + '、' + it : it; if (len(next) > max) break; out = next; } return out; };
 
 // 多頁版子頁的描述：先放這一頁的重點，不足 80 字再補首頁描述，最多 160 字
-export function pageDescription(content, tpl, page) {
-  const home = buildDescription(content, tpl);
-  if (!page || page.key === 'home') return home;
+// 子頁頁首顯示的一句話介紹（簡短、直接；不補長度）
+export function pageLead(content, tpl, page) {
+  if (!page || page.key === 'home') return '';
   const name = content.name || '本店';
   const hs = hoursSummary(content.hours);
   let lead = '';
-  if (page.key === 'about') lead = firstSentence(content.intro, 90) ? name + '：' + firstSentence(content.intro, 90) : '認識' + name + '。';
+  if (page.key === 'about') { const fs = firstSentence(content.intro, 90); lead = fs ? (fs.startsWith(name) ? fs : name + '：' + fs) : '認識' + name + '。'; }
   else if (page.key === 'menu') { const m = joinFit(liveMenu(content).map((i) => i.name + (i.price != null ? ' NT$' + i.price : '')), 90); lead = name + '的' + page.label + (m ? '：' + m + '。' : '。'); }
   else if (page.key === 'interior') lead = name + '的' + page.label + '，用照片看看實際的樣子。';
   else if (page.key === 'news') { const n = joinFit(liveNews(content).map((i) => i.title), 90); lead = name + '最新消息' + (n ? '：' + n + '。' : '。'); }
   else if (page.key === 'faq') { const f = joinFit(liveFaq(content).map((i) => i.q.replace(/[？?]$/, '')), 90); lead = name + '常見問題' + (f ? '：' + f + '？' : '。'); }
   else if (page.key === 'visit') lead = name + page.label + '：' + (content.address ? '地址' + content.address + '。' : '') + (hs && len(hs) <= 60 ? '營業時間' + hs + '。' : '') + (content.phone ? '電話 ' + content.phone + '。' : '');
-  let out = lead;
+  return lead;
+}
+
+// 子頁的 meta description：一句話介紹不夠長時，補上首頁的說明
+export function pageDescription(content, tpl, page) {
+  const home = buildDescription(content, tpl);
+  if (!page || page.key === 'home') return home;
+  let out = pageLead(content, tpl, page);
   if (len(out) < MIN_DESC) out += home;
   if (len(out) > MAX_DESC) out = clip(out, MAX_DESC - 1) + '…';
   return out;

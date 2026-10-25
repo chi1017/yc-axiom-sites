@@ -2,7 +2,7 @@
 import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews } from './content.js';
 import { getPalette } from './palettes.js';
 import { getTemplate } from './registry.js';
-import { buildTitle, buildDescription, pageTitle, pageDescription, absUrl, robotsTxt, sitemapXml, llmsTxt } from './seo.js';
+import { buildTitle, buildDescription, pageTitle, pageDescription, pageLead, absUrl, robotsTxt, sitemapXml, llmsTxt } from './seo.js';
 import { normalizeLayout, normalizePages, enabledPages } from './pages.js';
 import { parseAddress } from './region.js';
 
@@ -84,7 +84,8 @@ export function buildSite(input) {
       // FAQPage：一頁版在首頁；多頁版在常見問題頁（全部）與首頁（前幾題，與畫面上顯示的一致）
       faqOnPage: multi ? (pg.key === 'faq' ? true : pg.key === 'home' ? 'teaser' : false) : true,
       title: multi ? pageTitle(content, tpl, pg) : buildTitle(content, tpl),
-      description: multi ? pageDescription(content, tpl, pg) : buildDescription(content, tpl)
+      description: multi ? pageDescription(content, tpl, pg) : buildDescription(content, tpl),
+      lead: multi ? pageLead(content, tpl, pg) : ''
     };
     return { html: tpl.render(model), title: model.title, description: model.description };
   };

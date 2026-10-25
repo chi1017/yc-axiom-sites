@@ -61,11 +61,11 @@ function heroSec(x) {
 }
 
 // ── 子頁的頁首（多頁版每頁一個 h1）──
-// 子頁頁首：頁名（h1）＋一段介紹（與 meta description 相同）；本頁沒有照片時放主視覺照片
+// 子頁頁首：頁名（h1）＋一句簡短介紹（直接回答「這頁是什麼」）；本頁沒有照片時放主視覺照片
 function pageHead(x, title, key) {
   const hero = x.c.photos.hero;
   const withImg = hero && !['interior', 'about'].includes(key);
-  const text = '<div><p class="kicker">' + x.name + '</p><h1>' + title + '</h1><p class="lead">' + esc(x.m.description) + '</p></div>';
+  const text = '<div><p class="kicker">' + x.name + '</p><h1>' + title + '</h1><p class="lead">' + esc(x.m.lead || x.m.description) + '</p></div>';
   if (!withImg) return '<section class="page-head" id="top"><div class="wrap">' + text + '</div></section>';
   return '<section class="page-head" id="top"><div class="wrap hero-grid">' + text + '<figure>' + img(x, 'hero', hero, x.nm + ' 店家主視覺', 'high') + '</figure></div></section>';
 }
@@ -77,7 +77,7 @@ function contactStrip(x) {
   const rows = [];
   if (c.address) rows.push('<dt>地址</dt><dd>' + esc(c.address) + (x.mapUrl ? '（<a href="' + esc(x.mapUrl) + '" target="_blank" rel="noopener noreferrer">Google 地圖</a>）' : '') + '</dd>');
   if (c.phone) rows.push('<dt>電話</dt><dd>' + (x.tel ? '<a href="' + esc(x.tel) + '">' + esc(c.phone) + '</a>' : esc(c.phone)) + '</dd>');
-  if (hs) rows.push('<dt>營業時間</dt><dd>' + esc(hs) + '</dd>');
+  if (hs) rows.push('<dt>營業時間</dt><dd><ul class="hours-list">' + groupHours(c.hours).map((g) => '<li>' + esc(g.label) + ' ' + esc(g.text) + '</li>').join('') + '</ul></dd>');
   if (!rows.length) return '';
   return '<section class="contact-strip"><div class="wrap"><h2>' + x.name + ' ' + esc(x.t.visit.label) + '</h2><dl class="info">' + rows.join('') + '</dl>' +
     (x.on('visit') ? more(x, 'visit', '交通與完整' + esc(x.t.visit.label)) : more(x, 'home', '回首頁')) + '</div></section>';
@@ -275,7 +275,9 @@ function multiPageMain(x, key) {
   const title = key === 'about' ? '關於' + x.name : esc(x.label[key]);
   const body = { about: () => aboutSec(x, 'page'), menu: () => menuSec(x, 'page'), interior: () => interiorSec(x, 'page'),
     news: () => newsSec(x, 'page'), faq: () => faqSec(x, 'page'), visit: () => visitSec(x, 'page') }[key];
-  return [pageHead(x, title, key), body(), key === 'visit' ? '' : contactStrip(x)];
+  // 其他頁面也放幾題常見問題（只顯示，不重複標記 FAQPage；完整標記在常見問題頁）
+  const faqTeaser = key !== 'faq' && x.on('faq') && x.m.show.faq && x.faq.length ? faqSec(x, 'teaser') : '';
+  return [pageHead(x, title, key), body(), faqTeaser, key === 'visit' ? '' : contactStrip(x)];
 }
 
 // 區塊交替底色、捲動進場動態（首屏不套用，避免拖慢 LCP）
