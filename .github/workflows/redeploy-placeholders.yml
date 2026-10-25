@@ -1,0 +1,39 @@
+name: Redeploy maintenance / closed pages
+
+# 手動執行：把所有 suspended（維護中）與 cancelled（已停止服務）網站的頁面用目前的版型重新部署一次。
+# 預設只列出名單（dry_run），確認後再取消勾選正式執行。
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 只列出名單，不部署
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: redeploy-placeholders
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Redeploy
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then node build/redeploy-placeholders.mjs --dry-run; else node build/redeploy-placeholders.mjs; fi
