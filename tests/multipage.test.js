@@ -10,7 +10,7 @@ const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', 
 const URL_ = 'https://wuhou-cafe.pages.dev/';
 const build = (over = {}) => buildSite({ template: 'cafe', siteUrl: URL_, ...sample, lastmod: '2026-10-25', ...over });
 const multi = (over = {}) => build({ layout: 'multi', ...over });
-const htmlFiles = (files) => Object.entries(files).filter(([f]) => f.endsWith('.html'));
+const htmlFiles = (files) => Object.entries(files).filter(([f]) => f.endsWith('.html') && f !== '404.html');   // 404 頁另有專屬測試
 const BRAND = /yc[ _-]?axiom|ycaxiom|chi1017|788cblaq|generator|powered by/i;
 
 test('multi: one file per enabled page, single: only the home page', () => {
@@ -131,4 +131,21 @@ test('preview: renders the requested page with the given image URLs and placehol
   assert.equal(d.querySelector('h1').textContent, '服務與價格');
   assert.equal(r.files, undefined);
   assert.deepEqual(r.pages.map((p) => p.key), ['home', 'about', 'menu', 'interior', 'news', 'faq', 'visit']);
+});
+
+test('404 page: built for single and multi, noindex, root links to every page, not in sitemap', () => {
+  for (const layout of ['single', 'multi']) {
+    const { files } = build({ layout });
+    const nf = files['404.html'];
+    assert.ok(nf, layout);
+    const { document: d } = parseHTML(nf);
+    assert.equal(d.querySelector('meta[name=robots]').getAttribute('content'), 'noindex');
+    assert.equal(d.querySelectorAll('h1').length, 1);
+    assert.equal(d.querySelectorAll('link[rel=canonical]').length, 0);
+    const hrefs = [...d.querySelectorAll('main a')].map((a) => a.getAttribute('href'));
+    assert.equal(hrefs[0], '/');
+    for (const h of hrefs) assert.ok(h === '/' || (h.slice(1) + 'index.html') in files, layout + ' ' + h);
+    assert.ok(!files['sitemap.xml'].includes('404'));
+    assert.ok(!BRAND.test(nf));
+  }
 });

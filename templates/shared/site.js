@@ -92,6 +92,8 @@ export function buildSite(input) {
       'llms.txt': llmsTxt({ ...base, title: home.title, description: home.description })
     };
     pageList.filter((p) => p.path).forEach((p) => { out.files[p.path + 'index.html'] = renderPage(p).html; });
+    // Cloudflare Pages 沒有 404.html 時會把所有網址都回首頁（狀態 200），有了才會回真正的 404
+    out.files['404.html'] = tpl.renderNotFound(base);
   }
   return out;
 }
