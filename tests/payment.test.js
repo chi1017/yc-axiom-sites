@@ -173,3 +173,13 @@ test('order_done marks only this site\'s orders', async () => {
   assert.equal((await w.member({ action: 'order_done', trade_no: 'YCD2' })).status, 404);
   await w.member({ action: 'order_done', trade_no: 'YCD1', done: false }); assert.equal(w.t.shop_orders[0].fulfilled_at, null);
 });
+
+test('delete_site: drafts and unpaid pending sites can be removed by the owner (soft delete); live sites cannot', async () => {
+  const w = world({ site: { status: 'draft', first_published_at: null } });
+  const r = await w.member({ action: 'delete_site' });
+  assert.equal(r.status, 200); assert.equal(w.t.rental_sites[0].status, 'cancelled'); assert.ok(w.t.site_events.some((e) => e.type === 'deleted_by_member'));
+  const live = world({ site: { status: 'live' } });
+  assert.equal((await live.member({ action: 'delete_site' })).status, 409); assert.equal(live.t.rental_sites[0].status, 'live');
+  const was = world({ site: { status: 'pending', first_published_at: '2026-10-01T00:00:00Z' } });
+  assert.equal((await was.member({ action: 'delete_site' })).status, 409);
+});

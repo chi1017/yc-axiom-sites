@@ -155,7 +155,8 @@ var KEY_RE = /^[A-Za-z0-9]{16}$/;
 var PAY_MODES = ["off", "test", "live"];
 
 // supabase/functions/member-site/handler.mjs
-var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done"];
+var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site"];
+var DELETABLE = ["draft", "pending"];
 async function handleMember(req, deps) {
   const cors = corsHeaders(req, deps.allowedOrigins);
   const reply = (b, s) => json(b, s, cors);
@@ -182,6 +183,14 @@ async function handleMember(req, deps) {
   if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   const fail = (error, message, status = 400) => reply({ error, message }, status);
   if (["get_pay", "set_pay", "order_done"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
+  if (body.action === "delete_site") {
+    if (!DELETABLE.includes(site.status) || site.first_published_at) return fail("not_allowed", "已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止", 409);
+    const done = await db2.patchReturning("rental_sites", "id=eq." + siteId + "&status=in.(draft,pending)", { status: "cancelled" });
+    if (!done.length) return fail("not_allowed", "這個網站目前的狀態不能刪除", 409);
+    await db2.insert("site_events", { site_id: siteId, type: "deleted_by_member", detail: { from: site.status, by: "member:" + (user.email || user.id) } }).catch(() => {
+    });
+    return reply({ ok: true, message: "已刪除網站「" + (site.content && site.content.name || site.slug) + "」。" }, 200);
+  }
   if (body.action === "set_domain" && !["live", "overdue"].includes(site.status)) return fail("not_allowed", "網站上線後才能綁定自己的網域", 409);
   const by = "member:" + (user.email || user.id);
   const event = (type, detail) => db2.insert("site_events", { site_id: siteId, type, detail: { ...detail, by } }).catch(() => {

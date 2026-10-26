@@ -6,7 +6,9 @@ import { seal } from '../_shared/secretbox.mjs';
 import { MERCHANT_RE, KEY_RE, PAY_MODES } from '../_shared/shop.mjs';
 export { parseOrigins };
 
-const ACTIONS = ['set_domain', 'check_domain', 'clear_domain', 'get_pay', 'set_pay', 'order_done'];
+const ACTIONS = ['set_domain', 'check_domain', 'clear_domain', 'get_pay', 'set_pay', 'order_done', 'delete_site'];
+// 會員可以自己刪除的狀態：還沒上線過的草稿與待上線（沒有部署、沒有收款）。刪除＝改成已終止並隱藏，資料保留，管理員可以復原。
+export const DELETABLE = ['draft', 'pending'];
 
 /** deps: { allowedOrigins, getUser, db, dispatch, cf?, paySecret, now? } */
 export async function handleMember(req, deps) {
@@ -31,6 +33,13 @@ export async function handleMember(req, deps) {
   if (!site) return reply({ error: 'not_found', message: '找不到這個網站' }, 404);
   const fail = (error, message, status = 400) => reply({ error, message }, status);
   if (['get_pay', 'set_pay', 'order_done'].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
+  if (body.action === 'delete_site') {
+    if (!DELETABLE.includes(site.status) || site.first_published_at) return fail('not_allowed', '已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止', 409);
+    const done = await db.patchReturning('rental_sites', 'id=eq.' + siteId + '&status=in.(draft,pending)', { status: 'cancelled' });
+    if (!done.length) return fail('not_allowed', '這個網站目前的狀態不能刪除', 409);
+    await db.insert('site_events', { site_id: siteId, type: 'deleted_by_member', detail: { from: site.status, by: 'member:' + (user.email || user.id) } }).catch(() => {});
+    return reply({ ok: true, message: '已刪除網站「' + ((site.content && site.content.name) || site.slug) + '」。' }, 200);
+  }
   if (body.action === 'set_domain' && !['live', 'overdue'].includes(site.status)) return fail('not_allowed', '網站上線後才能綁定自己的網域', 409);
   const by = 'member:' + (user.email || user.id);
   const event = (type, detail) => db.insert('site_events', { site_id: siteId, type, detail: { ...detail, by } }).catch(() => {});
