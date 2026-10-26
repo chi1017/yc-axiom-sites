@@ -107,94 +107,51 @@ async function domainAction(action, ctx) {
   return fail("bad_request", "不支援的動作");
 }
 
-// supabase/functions/_shared/ecpay.mjs
-var ECPAY_TEST = { merchantId: "3002607", hashKey: "pwFHCqoQZGmho4w6", hashIV: "EkRm7iFT261dpevs" };
-var ECPAY_URL = {
-  stage: { checkout: "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5", period: "https://payment-stage.ecpay.com.tw/Cashier/CreditCardPeriodAction" },
-  prod: { checkout: "https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5", period: "https://payment.ecpay.com.tw/Cashier/CreditCardPeriodAction" }
-};
-function ecpayConfig(env = {}) {
-  const prod = env.ECPAY_ENV === "prod" && env.ECPAY_MERCHANT_ID && env.ECPAY_HASH_KEY && env.ECPAY_HASH_IV;
-  return prod ? { mode: "prod", merchantId: env.ECPAY_MERCHANT_ID, hashKey: env.ECPAY_HASH_KEY, hashIV: env.ECPAY_HASH_IV, ...ECPAY_URL.prod } : { mode: "stage", ...ECPAY_TEST, ...ECPAY_URL.stage };
+// supabase/functions/_shared/secretbox.mjs
+var te = new TextEncoder();
+var td = new TextDecoder();
+var b64 = (u8) => btoa(String.fromCharCode(...u8));
+async function keyFrom(secret) {
+  if (!secret) throw new Error("secretbox: missing secret");
+  const base = await crypto.subtle.importKey("raw", te.encode(secret), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: te.encode("yc-axiom-site-pay"), info: te.encode("ecpay-keys-v1") },
+    base,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
-function dotnetEncode(s) {
-  return encodeURIComponent(s).replace(/%20/g, "+").replace(/~/g, "%7e").replace(/'/g, "%27");
-}
-async function sha256Hex(s) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function checkMac(params, { hashKey, hashIV }) {
-  const keys = Object.keys(params).filter((k) => k !== "CheckMacValue").sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-  const raw = "HashKey=" + hashKey + "&" + keys.map((k) => k + "=" + params[k]).join("&") + "&HashIV=" + hashIV;
-  return (await sha256Hex(dotnetEncode(raw).toLowerCase())).toUpperCase();
-}
-function ecpayDate(d) {
-  const t = new Date(d.getTime() + 8 * 3600 * 1e3).toISOString();
-  return t.slice(0, 10).replace(/-/g, "/") + " " + t.slice(11, 19);
-}
-function newTradeNo(now = /* @__PURE__ */ new Date()) {
-  const r = [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(36).padStart(2, "0")).join("").slice(0, 6).toUpperCase();
-  return ("YC" + now.getTime().toString(36).toUpperCase() + r).slice(0, 20);
-}
-async function checkoutFields(order, cfg) {
-  const f = {
-    MerchantID: cfg.merchantId,
-    MerchantTradeNo: order.tradeNo,
-    MerchantTradeDate: ecpayDate(order.now || /* @__PURE__ */ new Date()),
-    PaymentType: "aio",
-    TotalAmount: String(order.amount),
-    TradeDesc: "網站租用",
-    ItemName: order.itemName,
-    ReturnURL: order.returnUrl,
-    ChoosePayment: order.kind === "atm" ? "ATM" : "Credit",
-    EncryptType: "1"
-  };
-  if (order.clientBackUrl) f.ClientBackURL = order.clientBackUrl;
-  if (order.custom1) f.CustomField1 = order.custom1;
-  if (order.kind === "atm") {
-    f.ExpireDate = "3";
-    if (order.paymentInfoUrl) f.PaymentInfoURL = order.paymentInfoUrl;
-  }
-  if (order.kind === "card_monthly") {
-    f.PeriodAmount = String(order.amount);
-    f.PeriodType = "M";
-    f.Frequency = "1";
-    f.ExecTimes = "99";
-    if (order.periodReturnUrl) f.PeriodReturnURL = order.periodReturnUrl;
-  }
-  f.CheckMacValue = await checkMac(f, cfg);
-  return f;
-}
-async function cancelPeriod(tradeNo, cfg, fetchImpl = fetch, now = /* @__PURE__ */ new Date()) {
-  const p = { MerchantID: cfg.merchantId, MerchantTradeNo: tradeNo, Action: "Cancel", TimeStamp: String(Math.floor(now.getTime() / 1e3)) };
-  p.CheckMacValue = await checkMac(p, cfg);
-  const res = await fetchImpl(cfg.period, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(p).toString(), signal: AbortSignal.timeout(1e4) });
-  const out = Object.fromEntries(new URLSearchParams(await res.text()));
-  return { ok: out.RtnCode === "1", code: out.RtnCode, message: out.RtnMsg || "" };
+async function seal(plain, secret) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await keyFrom(secret), te.encode(String(plain))));
+  return "v1." + b64(iv) + "." + b64(ct);
 }
 
-// supabase/functions/_shared/plans.mjs
-var PLANS = {
-  single: { name: "自架版（一頁）", monthly: 599, yearPaidMonths: 10 },
-  multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
+// templates/shared/palettes.js
+var PALETTES = {
+  forest: { label: "森林綠", bg: "#F6F3EC", surface: "#EAE4D6", text: "#22301F", muted: "#4F5A4B", accent: "#2F4A3A", onAccent: "#F6F3EC", line: "#D8D1C1" },
+  caramel: { label: "焦糖棕", bg: "#FBF6F0", surface: "#F0E3D3", text: "#3A2618", muted: "#6B5444", accent: "#8A5A3B", onAccent: "#FBF6F0", line: "#E2D2BE" },
+  ink: { label: "墨夜金", bg: "#17161A", surface: "#24222A", text: "#F1ECE2", muted: "#B9B2A5", accent: "#C9A66B", onAccent: "#17161A", line: "#36333C" },
+  mist: { label: "霧藍灰", bg: "#F3F5F6", surface: "#DDE5EA", text: "#1D2A33", muted: "#4C5C67", accent: "#3E5A6E", onAccent: "#F3F5F6", line: "#C9D3D9" },
+  rose: { label: "玫瑰粉", bg: "#F8F2F3", surface: "#EDDEE2", text: "#2E151B", muted: "#66474F", accent: "#AF4B65", onAccent: "#FFFFFF", line: "#DCC6CC" },
+  lilac: { label: "薰衣草", bg: "#F4F2F8", surface: "#E2DEED", text: "#1D162C", muted: "#504766", accent: "#6E55A8", onAccent: "#FFFFFF", line: "#CDC6DC" },
+  ocean: { label: "海洋藍", bg: "#F2F6F8", surface: "#DEE7ED", text: "#15242E", muted: "#475B66", accent: "#1F6F9E", onAccent: "#FFFFFF", line: "#C6D4DC" },
+  olive: { label: "橄欖綠", bg: "#F7F8F2", surface: "#EAEDDE", text: "#292E15", muted: "#606647", accent: "#647227", onAccent: "#FFFFFF", line: "#D8DCC6" },
+  clay: { label: "陶土紅", bg: "#F8F3F2", surface: "#EDE1DE", text: "#2E1A15", muted: "#664E47", accent: "#AA5137", onAccent: "#FFFFFF", line: "#DCCBC6" },
+  sand: { label: "沙丘黃", bg: "#F8F6F2", surface: "#EDE8DE", text: "#2E2515", muted: "#665C47", accent: "#916511", onAccent: "#FFFFFF", line: "#DCD5C6" },
+  graphite: { label: "石墨灰", bg: "#151719", surface: "#202427", text: "#EBEDEF", muted: "#ABB2BA", accent: "#9AA3AD", onAccent: "#151719", line: "#353A41" },
+  midnight: { label: "夜海藍", bg: "#13171B", surface: "#1E2429", text: "#E9EDF1", muted: "#A8B3BD", accent: "#6FA8DC", onAccent: "#13171B", line: "#323B43" }
 };
-var planFor = (layout) => layout === "multi" ? PLANS.multi : PLANS.single;
-var PAY_OPTIONS = {
-  card_monthly: { label: "信用卡每月自動扣款", kind: "card_monthly", months: 1 },
-  card_year: { label: "信用卡一次付 12 個月", kind: "card", months: 12 },
-  atm_1: { label: "ATM 轉帳 1 個月", kind: "atm", months: 1 },
-  atm_12: { label: "ATM 轉帳 12 個月", kind: "atm", months: 12 }
-};
-function priceFor(layout, months) {
-  const p = planFor(layout);
-  const years = Math.floor(months / 12);
-  return (years * p.yearPaidMonths + months % 12) * p.monthly;
-}
+var PALETTE_IDS = Object.keys(PALETTES);
+
+// supabase/functions/_shared/shop.mjs
+var MERCHANT_RE = /^\d{7,10}$/;
+var KEY_RE = /^[A-Za-z0-9]{16}$/;
+var PAY_MODES = ["off", "test", "live"];
 
 // supabase/functions/member-site/handler.mjs
-var ACTIONS = ["set_domain", "check_domain", "clear_domain", "pay_options", "checkout", "cancel_recurring"];
-var PAYABLE = ["pending", "live", "overdue", "suspended"];
+var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done"];
 async function handleMember(req, deps) {
   const cors = corsHeaders(req, deps.allowedOrigins);
   const reply = (b, s) => json(b, s, cors);
@@ -220,7 +177,7 @@ async function handleMember(req, deps) {
   const site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
   if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   const fail = (error, message, status = 400) => reply({ error, message }, status);
-  if (["pay_options", "checkout", "cancel_recurring"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
+  if (["get_pay", "set_pay", "order_done"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === "set_domain" && !["live", "overdue"].includes(site.status)) return fail("not_allowed", "網站上線後才能綁定自己的網域", 409);
   const by = "member:" + (user.email || user.id);
   const event = (type, detail) => db2.insert("site_events", { site_id: siteId, type, detail: { ...detail, by } }).catch(() => {
@@ -233,55 +190,49 @@ async function handleMember(req, deps) {
   return domainAction(body.action, { site, siteId, body, db: db2, cf: deps.cf, event, queueDeploy, reply, fail, audience: "member" });
 }
 async function payAction(body, site, user, deps, reply, fail) {
-  const cfg = deps.ecpay;
-  const enabled = !!cfg && !!deps.publicApi && (cfg.mode === "prod" || user.isAdmin);
   const { db: db2 } = deps;
   const now = (deps.now || (() => /* @__PURE__ */ new Date()))();
-  const plan = planFor(site.layout);
-  if (body.action === "pay_options") {
-    if (!enabled) return reply({ ok: true, enabled: false }, 200);
-    const active = await db2.getOne("pay_orders", "site_id=eq." + site.id + "&kind=eq.card_monthly&status=eq.active&select=trade_no,success_times,amount");
-    return reply({
-      ok: true,
-      enabled: PAYABLE.includes(site.status),
-      test: cfg.mode !== "prod",
-      plan: plan.name,
-      recurring: active || null,
-      options: Object.entries(PAY_OPTIONS).filter(([k]) => !(active && k === "card_monthly")).map(([key, o]) => ({ key, label: o.label, months: o.months, amount: priceFor(site.layout, o.months) }))
-    }, 200);
+  const by = "member:" + (user.email || user.id);
+  const cur = await db2.getOne("site_pay_settings", "site_id=eq." + site.id + "&select=site_id,mode,merchant_id,key_enc,iv_enc,updated_at");
+  const was = cur ? cur.mode : "off";
+  const view = (r) => ({ mode: r ? r.mode : "off", merchant_id: r ? r.merchant_id || "" : "", has_keys: !!(r && r.key_enc && r.iv_enc), updated_at: r ? r.updated_at : null });
+  if (body.action === "get_pay") return reply({ ok: true, ...view(cur) }, 200);
+  if (body.action === "order_done") {
+    const tn = String(body.trade_no || "");
+    if (!/^[A-Za-z0-9]{1,20}$/.test(tn)) return fail("bad_request", "缺少訂單編號");
+    const done = body.done !== false;
+    const r = await db2.patchReturning("shop_orders", "trade_no=eq." + tn + "&site_id=eq." + site.id, { fulfilled_at: done ? now.toISOString() : null, updated_at: now.toISOString() });
+    if (!r.length) return fail("not_found", "找不到這筆訂單", 404);
+    return reply({ ok: true, done }, 200);
   }
-  if (!enabled) return fail("not_enabled", "線上付款尚未開放，請先用銀行轉帳", 409);
-  if (body.action === "cancel_recurring") {
-    const active = await db2.getOne("pay_orders", "site_id=eq." + site.id + "&kind=eq.card_monthly&status=eq.active&select=trade_no");
-    if (!active) return fail("no_recurring", "這個網站沒有設定每月自動扣款", 409);
-    const r = await cancelPeriod(active.trade_no, cfg, deps.fetchImpl, now).catch((e) => ({ ok: false, message: String(e.message || e) }));
-    if (!r.ok) return fail("ecpay_error", "取消失敗：" + (r.message || "請稍後再試"), 502);
-    await db2.patch("pay_orders", "trade_no=eq." + active.trade_no, { status: "cancelled", updated_at: now.toISOString() });
-    await db2.insert("site_events", { site_id: site.id, type: "recurring_cancelled", detail: { trade_no: active.trade_no, by: "member:" + (user.email || user.id) } }).catch(() => {
-    });
-    return reply({ ok: true, message: "已取消每月自動扣款。目前已付的期間不受影響，到期前會再寄提醒。" }, 200);
+  const mode = PAY_MODES.includes(body.mode) ? body.mode : "";
+  if (!mode) return fail("bad_request", "請選擇收款模式");
+  const patch = { mode, updated_at: now.toISOString() };
+  if (mode === "live") {
+    const mid = String(body.merchant_id || "").trim();
+    const key = String(body.hash_key || "").trim(), iv = String(body.hash_iv || "").trim();
+    if (!MERCHANT_RE.test(mid)) return fail("bad_request", "特店編號（MerchantID）格式不正確，應該是 7 到 10 位數字");
+    if (mid === "3002607" || mid === "2000132") return fail("bad_request", "這是綠界的測試帳號。要測試請選「測試模式」；正式收款請填你自己的特店編號");
+    const changingKeys = key || iv || !cur || !cur.key_enc || cur.merchant_id !== mid;
+    if (changingKeys) {
+      if (!KEY_RE.test(key) || !KEY_RE.test(iv)) return fail("bad_request", "HashKey 與 HashIV 都是 16 個英文或數字，請到綠界廠商後台複製貼上");
+      patch.key_enc = await seal(key, deps.paySecret);
+      patch.iv_enc = await seal(iv, deps.paySecret);
+    }
+    patch.merchant_id = mid;
   }
-  const opt = PAY_OPTIONS[body.option];
-  if (!opt) return fail("bad_request", "請選擇付款方式");
-  if (!PAYABLE.includes(site.status)) return fail("not_allowed", site.status === "draft" ? "請先在編輯器按「發佈」送出上線申請，再付款" : "這個網站目前無法付款", 409);
-  if (opt.kind === "card_monthly" && await db2.getOne("pay_orders", "site_id=eq." + site.id + "&kind=eq.card_monthly&status=eq.active&select=trade_no")) return fail("already_recurring", "這個網站已經設定每月自動扣款", 409);
-  const amount = priceFor(site.layout, opt.months);
-  const tradeNo = newTradeNo(now);
-  await db2.insert("pay_orders", { trade_no: tradeNo, site_id: site.id, member_id: site.member_id, kind: opt.kind, months: opt.months, amount, test: cfg.mode !== "prod" });
-  const api = deps.publicApi.replace(/\/$/, "");
-  const shop = String(site.content && site.content.name || site.slug).replace(/[#&]/g, " ").slice(0, 30);
-  const fields = await checkoutFields({
-    tradeNo,
-    amount,
-    kind: opt.kind,
-    now,
-    itemName: "網站租用 " + plan.name + " " + (opt.kind === "card_monthly" ? "每月" : opt.months + " 個月") + "（" + shop + "）",
-    returnUrl: api + "/ecpay",
-    periodReturnUrl: api + "/ecpay-period",
-    paymentInfoUrl: api + "/ecpay-info",
-    clientBackUrl: deps.dashboardUrl || void 0
-  }, cfg);
-  return reply({ ok: true, action: cfg.checkout, fields, test: cfg.mode !== "prod" }, 200);
+  if (cur) await db2.patch("site_pay_settings", "site_id=eq." + site.id, patch);
+  else await db2.insert("site_pay_settings", { site_id: site.id, member_id: site.member_id, ...patch });
+  await db2.insert("site_events", { site_id: site.id, type: "pay_settings", detail: { mode, ...patch.merchant_id ? { merchant_id: patch.merchant_id } : {}, keys_changed: !!patch.key_enc, by } }).catch(() => {
+  });
+  let warning = "";
+  if (was === "off" !== (mode === "off") && ["live", "overdue"].includes(site.status) && site.live_version_id) {
+    const d = await deps.dispatch({ siteId: site.id, versionId: site.live_version_id }).catch((e) => ({ ok: false, error: String(e) }));
+    if (!d.ok) warning = "網站沒有自動重新發佈，請到編輯器按一次「發佈」。";
+  }
+  const after = await db2.getOne("site_pay_settings", "site_id=eq." + site.id + "&select=site_id,mode,merchant_id,key_enc,iv_enc,updated_at");
+  const msg = mode === "off" ? "已關閉線上收款。" : mode === "test" ? "已開啟測試模式：可以用綠界測試卡號下單，不會真的收款。" : "已開啟正式收款，款項會進到你的綠界帳戶。建議先自己下一筆小額訂單確認。";
+  return reply({ ok: true, ...view(after), message: msg + (warning ? " " + warning : ""), ...warning ? { warning } : {} }, 200);
 }
 
 // build/lib/supabase.mjs
@@ -449,21 +400,11 @@ var need = (k) => {
   return v;
 };
 var SUPABASE_URL = need("SUPABASE_URL");
-var db = makeSupabase({ url: SUPABASE_URL, serviceKey: need("SUPABASE_SERVICE_ROLE_KEY") });
+var SERVICE = need("SUPABASE_SERVICE_ROLE_KEY");
+var db = makeSupabase({ url: SUPABASE_URL, serviceKey: SERVICE });
 var getUser = makeGetUser({ supabaseUrl: SUPABASE_URL, anonKey: need("SUPABASE_ANON_KEY") });
 var dispatch = makeDispatcher({ token: Deno.env.get("GITHUB_DISPATCH_TOKEN") || "", repo: Deno.env.get("GITHUB_REPO") || "chi1017/yc-axiom-sites", ref: Deno.env.get("GITHUB_REF") || "main" });
 var CF_TOKEN = Deno.env.get("CLOUDFLARE_API_TOKEN") || "";
 var CF_ACCOUNT = Deno.env.get("CLOUDFLARE_ACCOUNT_ID") || "";
 var cf = CF_TOKEN && CF_ACCOUNT ? makeCloudflare({ token: CF_TOKEN, accountId: CF_ACCOUNT }) : void 0;
-var ecpay = ecpayConfig({ ECPAY_ENV: Deno.env.get("ECPAY_ENV"), ECPAY_MERCHANT_ID: Deno.env.get("ECPAY_MERCHANT_ID"), ECPAY_HASH_KEY: Deno.env.get("ECPAY_HASH_KEY"), ECPAY_HASH_IV: Deno.env.get("ECPAY_HASH_IV") });
-var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
-Deno.serve((req) => handleMember(req, {
-  allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")),
-  db,
-  getUser,
-  dispatch,
-  cf,
-  ecpay,
-  publicApi: SUPABASE_URL.replace(/\/$/, "") + "/functions/v1/site-public",
-  dashboardUrl: SITE_BASE + "dashboard/"
-}));
+Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf, paySecret: Deno.env.get("PAY_SECRET") || SERVICE }));

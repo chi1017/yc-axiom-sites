@@ -1,5 +1,5 @@
 // 瀏覽器預覽與 Node 建置共用的入口：同一份內容 → 同一份 HTML。
-import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews, livePosts } from './content.js';
+import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews, livePosts, liveItems } from './content.js';
 import { clip } from './escape.js';
 import { getPalette } from './palettes.js';
 import { getTemplate } from './registry.js';
@@ -30,12 +30,14 @@ export function imagePlan(content) {
     variants: VARIANT_WIDTHS.map((w) => ({ w, file: 'images/' + role + '-' + w + '.webp' })), path: p.path, w: p.w || 0 });
   if (content.photos.hero) add('hero', content.photos.hero);
   content.photos.room.forEach((p, i) => add('room-' + (i + 1), p));
+  if (content.shop.enabled) liveItems(content).forEach((it) => { if (it.photo) add('item-' + it.id, it.photo); });
   return out;
 }
 
 /**
  * input: { template, content, palette, sections, layout?, pages?, page?, siteUrl, preview?, imageSrc?(role, photo, plannedFile), lastmod?, headingFont?, siteId?, publicApi? }
  *  - siteId／publicApi：聯絡表單送出與瀏覽計數用（publicApi＝Edge Function site-public 的網址）
+ *  - payReady：店家已在會員專區設定綠界收款（線上購買與預約訂金才會開放付款）
  *  - imageVariants：true 時圖片加上 srcset（呼叫端要另外寫入 images/<role>-800.webp）
  *  - headingFont：true 時 CSS 加上標題網頁字型（呼叫端要另外寫入 fonts/heading.woff2）
  *  - template：行業 key（industries.js），所有行業共用同一套版型
@@ -71,6 +73,7 @@ export function buildSite(input) {
     tpl, content, paletteId, colors: getPalette(paletteId), sections, show, siteUrl, preview, layout, pageList,
     // 聯絡表單與瀏覽計數（正式建置時由 build/run.mjs 傳入；沒有時表單顯示為示範、不送統計）
     siteId: input.siteId || '', bookingAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/booking' : '', formAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/contact' : '', hitUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/hit' : '',
+    shopAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/shop' : '', payReady: !!input.payReady,
     headingFont: !preview && !!input.headingFont,   // 建置端會另外產生 fonts/heading.woff2（build/lib/heading-font.mjs）
     address: parseAddress(content.address),
     images: plan.map((p) => p.file),
@@ -85,6 +88,8 @@ export function buildSite(input) {
     return smaller.length ? smaller.map((v) => up + v.file + ' ' + v.w + 'w').concat(up + p.file + ' ' + w + 'w').join(', ') : '';
   };
   const posts = livePosts(content);
+  // 多頁版的線上購買有自己的頁面 shop/；一頁版放在首頁
+  const shopPage = multi && content.shop.enabled && liveItems(content).length > 0;
   const hasEn = content.en.enabled && !!content.en.name && !!content.en.intro;
   const renderPage = (pg, extra = {}) => {
     const depth = extra.depth != null ? extra.depth : (pg.path ? 1 : 0);
@@ -96,7 +101,7 @@ export function buildSite(input) {
     const srcsetOf = srcsetFor(up);
     const model = {
       ...base, page: pg.key, pageInfo: multi ? pg : null, imageSrc, srcsetOf, href,
-      postsHref: up + 'posts/', postHref: (id) => up + 'posts/' + id + '/', anchorBase: depth ? up : '', enHref: up + 'en/',
+      postsHref: up + 'posts/', shopHref: up + 'shop/', postHref: (id) => up + 'posts/' + id + '/', anchorBase: depth ? up : '', enHref: up + 'en/',
       // 英文版開啟時，中文首頁與英文頁用 hreflang 互相對應
       alternates: hasEn && pg.key === 'home' ? [['zh-Hant', siteUrl], ['en', absUrl(siteUrl, 'en/')], ['x-default', siteUrl]] : null,
       pageUrl: absUrl(siteUrl, pg.path),
@@ -135,13 +140,22 @@ export function buildSite(input) {
     out.files = {
       'index.html': home.html,
       'robots.txt': robotsTxt(siteUrl),
-      'sitemap.xml': sitemapXml(siteUrl, lastmod, pageList.map((p) => p.path).concat(posts.length ? ['posts/', ...posts.map((p) => 'posts/' + p.id + '/')] : []).concat(hasEn ? ['en/'] : [])),
+      'sitemap.xml': sitemapXml(siteUrl, lastmod, pageList.map((p) => p.path).concat(shopPage ? ['shop/'] : []).concat(posts.length ? ['posts/', ...posts.map((p) => 'posts/' + p.id + '/')] : []).concat(hasEn ? ['en/'] : [])),
       'llms.txt': llmsTxt({ ...base, title: home.title, description: home.description })
     };
     pageList.filter((p) => p.path).forEach((p) => { out.files[p.path + 'index.html'] = renderPage(p).html; });
     // Cloudflare Pages 沒有 404.html 時會把所有網址都回首頁（狀態 200），有了才會回真正的 404
     out.files['404.html'] = tpl.renderNotFound(base);
     if (content.contactForm || content.bookingForm) out.files['thanks/index.html'] = tpl.renderThanks(base);
+    if ((content.shop.enabled && liveItems(content).length) || (content.bookingForm && content.bookingDeposit)) out.files['order/index.html'] = tpl.renderOrderDone(base);
+    if (shopPage) {
+      out.files['shop/index.html'] = renderPage({ key: 'shop', label: '線上購買', path: 'shop/' }, { depth: 1, model: {
+        pageInfo: { key: 'shop', label: '線上購買' }, faqOnPage: false,
+        title: pageTitle(content, tpl, { key: 'shop', label: '線上購買' }),
+        description: fitDescription(clip(name + '線上購買：' + liveItems(content).slice(0, 6).map((i) => i.name).join('、'), 100) + '。', content, tpl),
+        lead: '選好品項與數量，填寫訂購單後線上付款。',
+        crumbs: [homeCrumb, { name: '線上購買', url: absUrl(siteUrl, 'shop/') }] } }).html;
+    }
     if (hasEn) {
       const enModel = { ...base, page: 'en', pageInfo: null, href: (k) => '../' + (k === 'home' ? '' : (pathOf[k] || '')), imageSrc: (role) => (fileOf[role] ? '../' + fileOf[role] : ''),
         srcsetOf: srcsetFor('../'), pageUrl: absUrl(siteUrl, 'en/'), title: content.en.name, description: content.en.intro };

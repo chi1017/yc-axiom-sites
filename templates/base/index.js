@@ -1,6 +1,6 @@
 import { esc, paragraphs, safeHttpsUrl, telHref, jsonForScript } from '../shared/escape.js';
 import { buildHead, buildBusinessLd, absUrl, FAVICON } from '../shared/seo.js';
-import { liveMenu, liveFaq, liveNews, liveReviews, livePosts, youtubeId } from '../shared/content.js';
+import { liveMenu, liveFaq, liveNews, liveReviews, livePosts, liveItems, youtubeId } from '../shared/content.js';
 import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
 import { pagesFor } from '../shared/pages.js';
 import { baseCss } from './styles.js';
@@ -23,6 +23,7 @@ function ctx(m) {
     tel: telHref(c.phone),
     bookUrl: safeHttpsUrl(c.booking.url),
     menu: liveMenu(c), faq: liveFaq(c), news: liveNews(c), reviews: liveReviews(c), posts: livePosts(c),
+    items: c.shop.enabled ? liveItems(c) : [],
     mapUrl: c.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) : '',
     plainAddr: region ? m.address.region + m.address.street : c.address,   // 內文敘述不帶郵遞區號
     on: (key) => m.pageList.some((p) => p.key === key)
@@ -269,6 +270,49 @@ function contactSec(x, mode) {
     '<p class="note">你填寫的資料只會寄給' + x.name + '，用來回覆你的留言。</p></form></div></section>';
 }
 
+// ── 線上購買：商品卡片＋訂購單（一般 HTML 表單，沒有 JavaScript 也能填數量送出）；付款走店家自己的綠界帳號 ──
+const money = (n) => 'NT$ ' + Number(n).toLocaleString('en-US');
+function shopSec(x, mode) {
+  const { c, m } = x;
+  if (!c.shop.enabled) return '';
+  const items = x.items.length ? x.items : (x.preview ? [{ id: 'demo1', name: null, price: null, desc: '' }, { id: 'demo2', name: null, price: null, desc: '' }] : []);
+  if (!items.length) return '';
+  const live = !x.preview && m.siteId && m.shopAction && m.payReady;
+  const list = mode === 'teaser' ? items.slice(0, 3) : items;
+  const card = (i, n) => '<li>' + (i.photo ? '<figure>' + img(x, 'item-' + i.id, i.photo, i.name || '', false, SZ.third) + '</figure>' : '') +
+    '<div class="it"><h3>' + (i.name ? esc(i.name) : x.ph('商品名稱')) + '</h3><p class="price">' + (i.price ? money(i.price) : x.ph('價格')) + '</p>' +
+    (i.desc ? '<p class="desc">' + esc(i.desc) + '</p>' : '<p class="desc"></p>') +
+    (mode === 'teaser' ? '' : '<p><button class="btn small" type="button" data-add="' + esc(i.id) + '"' + (live ? '' : ' disabled') + '>加入訂購</button></p>') + '</div></li>';
+  const grid = '<ul class="shop-grid">' + list.map(card).join('') + '</ul>';
+  const title = mode === 'page' ? '' : '<h2>線上購買</h2>';
+  if (mode === 'teaser') return '<section id="shop"><div class="wrap">' + title + grid + '<p class="more"><a href="' + esc(m.shopHref) + '">前往線上購買</a></p></div></section>';
+  const note = c.shop.note ? '<p class="note">' + esc(c.shop.note) + '</p>' : '';
+  if (!live) {
+    const why = x.preview ? '（預覽：正式網站設定好收款後就能下單付款）' : !m.siteId ? '（示範網站：無法下單）' : '目前尚未開放線上付款，請用電話或 LINE 與我們聯絡訂購。';
+    return '<section id="shop"><div class="wrap">' + title + grid + note + '<p class="note">' + why + '</p></div></section>';
+  }
+  const rows = items.map((i) => '<tr><th scope="row">' + esc(i.name) + '</th><td>' + money(i.price) + '</td><td><label class="sr" for="q-' + esc(i.id) + '">' + esc(i.name) + ' 數量</label>' +
+    '<input id="q-' + esc(i.id) + '" name="q_' + esc(i.id) + '" type="number" min="0" max="99" step="1" value="0" inputmode="numeric" data-price="' + i.price + '"></td></tr>').join('');
+  return '<section id="shop"><div class="wrap">' + title + grid + note +
+    '<form class="contact-form shop-form" id="order" method="post" action="' + esc(m.shopAction) + '" style="max-width:640px">' +
+    '<input type="hidden" name="site" value="' + esc(m.siteId) + '">' +
+    '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
+    '<h3>訂購單</h3><table class="price-table cart"><thead><tr><th scope="col">品項</th><th scope="col">單價</th><th scope="col">數量</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<p class="cart-total" aria-live="polite">合計 <b data-total>NT$ 0</b></p>' +
+    '<div class="form-row"><p><label for="od-name">姓名</label><input id="od-name" name="name" type="text" maxlength="60" required autocomplete="name"></p>' +
+    '<p><label for="od-phone">手機</label><input id="od-phone" name="phone" type="tel" maxlength="24" required autocomplete="tel"></p></div>' +
+    '<p><label for="od-email">Email（付款結果會寄到這裡）</label><input id="od-email" name="email" type="email" maxlength="120" required autocomplete="email"></p>' +
+    '<p><label for="od-addr">收件地址（需要寄送才填）</label><input id="od-addr" name="address" type="text" maxlength="160" autocomplete="street-address"></p>' +
+    '<p><label for="od-note">備註（選填）</label><textarea id="od-note" name="note" rows="3" maxlength="500"></textarea></p>' +
+    '<p><button class="btn" type="submit">前往付款</button></p><p class="note" data-cart-msg aria-live="polite"></p>' +
+    '<p class="note">付款由綠界科技處理，可使用的付款方式依店家開通的項目而定。你填寫的資料只會提供給' + x.name + '處理這筆訂單。</p></form>' +
+    '<div class="cart-bar" hidden><span data-bar>已選 0 件</span><a class="btn" href="#order">填寫訂購單</a></div></div></section>';
+}
+const SHOP_SCRIPT = '<script>(function(){var f=document.getElementById("order");if(!f)return;var q=[].slice.call(f.querySelectorAll("input[data-price]")),t=f.querySelector("[data-total]"),bar=document.querySelector(".cart-bar"),bt=bar&&bar.querySelector("[data-bar]"),msg=f.querySelector("[data-cart-msg]");' +
+  'function n(i){var v=parseInt(i.value,10);return v>0?Math.min(v,99):0}function upd(){var s=0,c=0;q.forEach(function(i){s+=n(i)*+i.getAttribute("data-price");c+=n(i)});t.textContent="NT$ "+s.toLocaleString("en-US");if(bar){bar.hidden=!c;bt.textContent="已選 "+c+" 件，NT$ "+s.toLocaleString("en-US")}return s}' +
+  'f.addEventListener("input",upd);document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest("[data-add]");if(!b)return;var i=document.getElementById("q-"+b.getAttribute("data-add"));if(!i)return;i.value=Math.min(n(i)+1,99);upd();b.textContent="已加入 ✓";setTimeout(function(){b.textContent="加入訂購"},1200)});' +
+  'f.addEventListener("submit",function(e){if(!upd()){e.preventDefault();msg.textContent="請先選擇要購買的品項與數量";}});upd()})();</script>';
+
 // ── 線上預約：送出「預約申請」，店家收到通知後再與客人確認（網站不保留時段）──
 const PEOPLE_OFFERS = ['menu', 'room'];
 function bookingSec(x) {
@@ -283,7 +327,9 @@ function bookingSec(x) {
     ? '<p><label for="bk-item">想預約的' + esc(t.offer.item) + '</label><select id="bk-item" name="item"' + dis + '><option value="">（請選擇，可不選）</option>' + items.map((n) => '<option>' + esc(n) + '</option>').join('') + '</select></p>'
     : '';
   const hs = hasAnyHours(c.hours) ? '<p class="note">營業時間：' + esc(hoursSummary(c.hours)) + '</p>' : '';
-  return '<section id="booking"><div class="wrap"><h2>線上預約</h2><p>填寫想預約的日期與時間，送出後我們會盡快與你聯絡確認，確認後才算預約成功。</p>' + hs + note +
+  const dep = c.bookingDeposit && (x.preview || m.payReady) ? c.bookingDeposit : 0;
+  const depNote = dep ? '<p><b>預約需先付訂金 ' + money(dep) + '</b>，送出後會前往付款頁，付款完成才算送出預約申請。</p>' : '';
+  return '<section id="booking"><div class="wrap"><h2>線上預約</h2><p>填寫想預約的日期與時間，送出後我們會盡快與你聯絡確認，確認後才算預約成功。</p>' + depNote + hs + note +
     '<form class="contact-form" method="post" action="' + esc(live ? m.bookingAction : '#') + '">' +
     (live ? '<input type="hidden" name="site" value="' + esc(m.siteId) + '">' : '') +
     '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
@@ -294,7 +340,8 @@ function bookingSec(x) {
     '<p><label for="bk-name">姓名</label><input id="bk-name" name="name" type="text" maxlength="60" required autocomplete="name"' + dis + '></p>' +
     '<p><label for="bk-contact">電話或 Email</label><input id="bk-contact" name="contact" type="text" maxlength="120" required autocomplete="tel"' + dis + '></p>' +
     '<p><label for="bk-note">備註（選填）</label><textarea id="bk-note" name="message" rows="3" maxlength="500"' + dis + '></textarea></p>' +
-    '<p><button class="btn" type="submit"' + dis + '>送出預約申請</button></p>' +
+    (dep ? '<p><label for="bk-email">Email（付款結果會寄到這裡）</label><input id="bk-email" name="email" type="email" maxlength="120" required autocomplete="email"' + dis + '></p>' : '') +
+    '<p><button class="btn" type="submit"' + dis + '>' + (dep ? '送出並付訂金' : '送出預約申請') + '</button></p>' +
     '<p class="note">你填寫的資料只會寄給' + x.name + '，用來確認預約。</p></form></div></section>';
 }
 
@@ -339,6 +386,7 @@ function magazineMain(x, multi) {
   if (s.faq && x.faq.length) blocks.push(splitBlock(x, 'faq', '常見問題', faqBody, rooms[2], 'room-3', 'right'));
   blocks.push(infoBand(x));
   if (s.interior) blocks.push(photoStrip(x, rooms.slice(3), 4));
+  blocks.push(shopSec(x, multi ? 'teaser' : 'section'));
   if (multi) {
     if (x.on('news') && s.news) blocks.push(newsSec(x, 'teaser'));
     blocks.push(postsSec(x, 'teaser'));
@@ -354,7 +402,7 @@ function magazineMain(x, multi) {
 function singleMain(x) {
   const s = x.m.show;
   return [heroSec(x), aboutSec(x, 'section'), videoSec(x), s.menu ? menuSec(x, 'section') : '', s.interior ? interiorSec(x, 'section') : '',
-    reviewsSec(x), s.news ? newsSec(x, 'section') : '', postsSec(x, 'teaser'), s.faq ? faqSec(x, 'section') : '', bookingSec(x), visitSec(x, 'section'), contactSec(x, 'section')];
+    shopSec(x, 'section'), reviewsSec(x), s.news ? newsSec(x, 'section') : '', postsSec(x, 'teaser'), s.faq ? faqSec(x, 'section') : '', bookingSec(x), visitSec(x, 'section'), contactSec(x, 'section')];
 }
 
 // 多頁版首頁：主視覺 + 各頁摘要（頁面有開才放）；來店資訊頁沒開時把完整資訊放首頁
@@ -363,6 +411,7 @@ function multiHomeMain(x) {
   return [heroSec(x), aboutSec(x, 'teaser'), videoSec(x),
     x.on('menu') && s.menu ? menuSec(x, 'teaser') : '',
     x.on('interior') && s.interior ? interiorSec(x, 'teaser') : '',
+    shopSec(x, 'teaser'),
     reviewsSec(x),
     x.on('news') && s.news ? newsSec(x, 'teaser') : '',
     postsSec(x, 'teaser'),
@@ -429,13 +478,16 @@ function render(m) {
     ? m.pageList.filter((p) => p.key !== 'home').map((p) => [p.key, esc(p.label), m.href(p.key)])
     : [['about', true], ['menu', m.show.menu], ['interior', m.show.interior], ['news', m.show.news], ['faq', m.show.faq], ['visit', true]]
       .filter((i) => i[1]).map((i) => [i[0], esc(short[i[0]]), anchor + '#' + i[0]]);
+  if (x.items.length) navItems.splice(Math.min(2, navItems.length), 0, ['shop', '線上購買', multi ? m.shopHref : anchor + '#shop']);
   if (x.posts.length && m.postsHref) navItems.push(['posts', '文章', m.postsHref]);
   const cur = m.post ? 'posts' : m.page;
-  const nav = navItems.map((i) => '<a href="' + esc(i[2]) + '"' + ((multi || i[0] === 'posts') && i[0] === cur ? ' aria-current="page"' : '') + '>' + i[1] + '</a>').join('');
+  const nav = navItems.map((i) => '<a href="' + esc(i[2]) + '"' + ((multi || i[0] === 'posts' || i[0] === 'shop') && i[0] === cur ? ' aria-current="page"' : '') + '>' + i[1] + '</a>').join('');
   const magazine = c.homeStyle === 'magazine';
   const main = m.post ? postMain(x, m.post)
     : m.page === 'posts' ? [pageHead(x, '文章', 'posts'), postsSec(x, 'page'), contactStrip(x)]
+    : m.page === 'shop' ? [pageHead(x, '線上購買', 'shop'), shopSec(x, 'page'), contactStrip(x)]
     : multi ? (m.page === 'home' ? (magazine ? magazineMain(x, true) : multiHomeMain(x)) : multiPageMain(x, m.page)) : (magazine ? magazineMain(x, false) : singleMain(x));
+  const body = finish(main);
   const footNav = multi ? '<nav class="foot-nav" aria-label="頁尾選單"><a href="' + esc(m.href('home')) + '">首頁</a>' + navItems.map((i) => '<a href="' + esc(i[2]) + '">' + i[1] + '</a>').join('') + '</nav>' : '';
   const enLink = c.en.enabled && c.en.name && c.en.intro && m.enHref ? '<a class="lang-link" href="' + esc(m.enHref) + '" hreflang="en" lang="en">English</a>' : '';
   const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + (enLink ? '　' + enLink : '') + '</span>' + footNav + '</div></footer>';
@@ -444,7 +496,7 @@ function render(m) {
     '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : (anchor || '#top')) + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
     '<nav id="site-nav" aria-label="頁面選單">' + nav + '</nav></div></header>\n' +
-    '<main id="main">\n' + finish(main) + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + trackers(m) + '</body>\n</html>\n';
+    '<main id="main">\n' + body + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + (body.includes('id="order"') ? SHOP_SCRIPT + '\n' : '') + trackers(m) + '</body>\n</html>\n';
 }
 
 // 404 頁：不存在的網址回傳真正的 404（避免「軟 404」被當成重複首頁收錄）。
@@ -520,10 +572,23 @@ function renderThanks(m) {
     '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
 }
 
+// 付款完成（或離開付款頁）後回到的頁面（noindex、不列入 sitemap）
+function renderOrderDone(m) {
+  const c = m.content;
+  const name = c.name ? esc(c.name) : '';
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    '<title>謝謝你的訂購' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
+    '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
+    '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
+    '<main id="main"><section class="page-head"><div class="wrap"><h1>謝謝你，訂單已送出</h1>' +
+    '<p class="lead">付款成功後，你會收到確認信，我們也會收到通知並盡快處理。如果選擇 ATM 或超商付款，請在期限內完成繳費。沒有收到確認信，請直接與我們聯絡。</p><p class="more"><a href="/">回首頁</a></p></div></section></main>\n' +
+    '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
+}
+
 // 依行業設定產生版型物件：版面與流程全行業共用，只有用詞與 schema.org 類型不同
 export function makeTemplate(industry) {
   return {
     id: industry.key, label: industry.label, kindLabel: industry.kindLabel, schemaType: industry.schemaType,
-    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound, renderThanks, renderEn
+    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound, renderThanks, renderEn, renderOrderDone
   };
 }
