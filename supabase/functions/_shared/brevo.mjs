@@ -10,7 +10,7 @@ export function makeBrevoSender({ apiKey, fetchImpl = fetch, timeoutMs = 10000 }
       const res = await fetchImpl('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: { 'api-key': apiKey, 'Content-Type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ sender: SENDER, replyTo: { email: SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
+        body: JSON.stringify({ sender: SENDER, replyTo: { email: m.replyTo || SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
         signal: AbortSignal.timeout(timeoutMs)
       });
       if (res.ok) return { ok: true };

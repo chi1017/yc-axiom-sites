@@ -1,4 +1,4 @@
-import { SECTION_LABELS, validDate, validTime, DAYS, DAY_LABELS } from './content.js';
+import { SECTION_LABELS, validDate, validTime, DAYS, DAY_LABELS, youtubeId, GA4_RE } from './content.js';
 import { hasAnyHours } from './hours.js';
 import { safeHttpsUrl } from './escape.js';
 import { slugError } from './slug.js';
@@ -53,6 +53,13 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
       if (!n.title && n.date) add('news.' + i, '最新消息第 ' + (i + 1) + ' 則缺少標題');
     });
   }
+  // 更多內容
+  const rawVideo = String((raw && raw.video) || '').trim();
+  if (rawVideo && !youtubeId(rawVideo)) add('video', '影片網址要是 YouTube 的影片連結（例如 https://www.youtube.com/watch?v=…）');
+  const rawGa = String((raw && raw.ga4) || '').trim();
+  if (rawGa && !GA4_RE.test(rawGa.toUpperCase())) add('ga4', 'Google Analytics 評估 ID 格式是 G- 開頭（例如 G-AB12CD34EF）');
+  content.reviews.forEach((r, i) => { if (r.name && !r.text) add('reviews.' + i, '客人評價第 ' + (i + 1) + ' 則缺少內容'); });
+  if (content.showMap && !content.address) add('address', '要顯示地圖，請先填店家地址');
   if (template !== undefined && !getIndustry(template)) add('template', '不支援的行業類型，請重新選擇');
   const se = slugError(slug, { allowBrand: !checkBrand });
   if (se) add('slug', se);

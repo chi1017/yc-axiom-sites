@@ -26,7 +26,8 @@ export const HEADERS_FILE = `/*
 
 // mode: 'normal'（部署客戶網站）｜'maintenance'（部署「維護中」頁，僅限 suspended）｜'closed'（部署「已停止服務」頁，僅限 cancelled）
 // sendMail?: ({to,subject,html,text}) → {ok,error?}  部署成功後寄「網站已上線」信；失敗只記錄，絕不影響部署結果
-export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db, cf, deploy, sendMail, log = console.log, now = () => new Date() }) {
+// publicApi?: Edge Function site-public 的網址（聯絡表單送出、瀏覽計數）；沒有時網站不送統計、表單顯示為示範
+export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db, cf, deploy, sendMail, publicApi = '', log = console.log, now = () => new Date() }) {
   const t0 = Date.now();
   const event = (type, detail) => db.insert('site_events', { site_id: siteId, type, detail }).catch((e) => log('event 寫入失敗：' + e.message));
   try {
@@ -65,7 +66,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     let variants = true;
     try { for (const img of images) img.variantBufs = await Promise.all(img.variants.map((v) => makeSmall(img.buf, v.w))); } catch (e) { variants = false; log('手機小圖產生失敗，改用原圖：' + e.message); }
 
-    const buildArgs = { template: site.template, content, palette, sections, layout, pages, siteUrl, imageVariants: variants, lastmod: now().toISOString().slice(0, 10) };
+    const buildArgs = { template: site.template, content, palette, sections, layout, pages, siteUrl, imageVariants: variants, lastmod: now().toISOString().slice(0, 10), siteId: site.id, publicApi };
     let built = buildSite({ ...buildArgs, headingFont: true });
     // 標題字型：只含標題用到的字；產生失敗就改用系統字重建（不讓字型問題擋住部署）
     let fontBuf = null;

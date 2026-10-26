@@ -470,6 +470,16 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     async list(table, query) {
       return await rest(table + "?" + query) || [];
     },
+    // 呼叫資料庫函式（RPC）
+    async rpc(fn, args) {
+      return rest("rpc/" + fn, { method: "POST", body: args || {} });
+    },
+    async count(table, query) {
+      const res = await fetchImpl(base + "/rest/v1/" + table + "?" + query + "&select=id", { method: "HEAD", headers: headers({ Prefer: "count=exact" }) });
+      if (!res.ok) throw new Error("Supabase count " + table + " → " + res.status);
+      const m = (res.headers.get("content-range") || "").match(/\/(\d+)$/);
+      return m ? Number(m[1]) : 0;
+    },
     // Storage：列出某個資料夾（prefix）底下的物件；回傳 [{name,id,created_at,...}]（資料夾的 id 為 null）
     async storageList(bucket, prefix, { offset = 0, limit = 100 } = {}) {
       const res = await fetchImpl(base + "/storage/v1/object/list/" + bucket, { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ prefix, limit, offset, sortBy: { column: "name", order: "asc" } }) });
@@ -499,7 +509,7 @@ function makeBrevoSender({ apiKey, fetchImpl = fetch, timeoutMs = 1e4 }) {
       const res = await fetchImpl("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: { "api-key": apiKey, "Content-Type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ sender: SENDER, replyTo: { email: SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
+        body: JSON.stringify({ sender: SENDER, replyTo: { email: m.replyTo || SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
         signal: AbortSignal.timeout(timeoutMs)
       });
       if (res.ok) return { ok: true };

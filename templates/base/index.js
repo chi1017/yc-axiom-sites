@@ -1,6 +1,6 @@
 import { esc, paragraphs, safeHttpsUrl, telHref } from '../shared/escape.js';
 import { buildHead } from '../shared/seo.js';
-import { liveMenu, liveFaq, liveNews } from '../shared/content.js';
+import { liveMenu, liveFaq, liveNews, liveReviews, youtubeId } from '../shared/content.js';
 import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
 import { pagesFor } from '../shared/pages.js';
 import { baseCss } from './styles.js';
@@ -22,7 +22,7 @@ function ctx(m) {
     name: c.name ? esc(c.name) : ph(PH_NAME),
     tel: telHref(c.phone),
     bookUrl: safeHttpsUrl(c.booking.url),
-    menu: liveMenu(c), faq: liveFaq(c), news: liveNews(c),
+    menu: liveMenu(c), faq: liveFaq(c), news: liveNews(c), reviews: liveReviews(c),
     mapUrl: c.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) : '',
     plainAddr: region ? m.address.region + m.address.street : c.address,   // 內文敘述不帶郵遞區號
     on: (key) => m.pageList.some((p) => p.key === key)
@@ -201,7 +201,52 @@ function visitSec(x, mode) {
     '</dl></div><div><' + hh + ' class="sub">營業時間</' + hh + '>' + hoursTable +
     (c.hoursNote ? '<p class="note">' + esc(c.hoursNote) + '</p>' : '') + '</div></div>' +
     (text.length ? '<div class="visit-text">' + text.map((p) => '<p>' + p + '</p>').join('') + '</div>' : '') +
-    '</div></section>';
+    mapBox(x) + '</div></section>';
+}
+
+// ── 客人評價（只顯示，不加 Review 結構化資料：店家自己放的評價不符合搜尋引擎的評價標記規範）──
+function reviewsSec(x) {
+  if (!x.reviews.length) return '';
+  return '<section id="reviews"><div class="wrap"><h2>客人評價</h2><div class="reviews">' +
+    x.reviews.map((r) => '<figure class="review"><blockquote><p>' + esc(r.text) + '</p></blockquote>' + (r.name ? '<figcaption>— ' + esc(r.name) + '</figcaption>' : '') + '</figure>').join('') +
+    '</div></div></section>';
+}
+
+// ── YouTube 影片：先顯示縮圖，點了才載入播放器（不拖慢網頁）；沒有 JavaScript 時直接連到 YouTube ──
+function videoSec(x) {
+  const id = youtubeId(x.c.video);
+  if (!id) return '';
+  return '<section id="video"><div class="wrap"><h2>影片介紹</h2><a class="embed-load yt" href="https://www.youtube.com/watch?v=' + id + '" target="_blank" rel="noopener noreferrer" ' +
+    'data-embed="https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1" data-title="' + esc(x.nm) + ' 影片">' +
+    '<img src="https://i.ytimg.com/vi/' + id + '/hqdefault.jpg" alt="' + esc(x.nm) + ' 影片" width="480" height="360" loading="lazy" decoding="async"><span class="play" aria-hidden="true"></span><span class="sr">播放影片</span></a></div></section>';
+}
+
+// ── Google 地圖：點了才載入（地圖程式很大，直接嵌入會拖慢網頁）──
+function mapBox(x) {
+  const { c } = x;
+  if (!c.showMap || !c.address) return '';
+  return '<div class="map-box"><a class="embed-load map" href="' + esc(x.mapUrl) + '" target="_blank" rel="noopener noreferrer" ' +
+    'data-embed="https://www.google.com/maps?q=' + encodeURIComponent(c.address) + '&amp;output=embed" data-title="' + esc(x.nm) + ' 地圖">' +
+    '<span>在這裡顯示 Google 地圖</span><small>' + esc(c.address) + '</small></a></div>';
+}
+
+// ── 聯絡表單：一般 HTML 表單，不需要 JavaScript；留言寄到網站擁有者的 Email ──
+function contactSec(x, mode) {
+  const { c, m } = x;
+  if (!c.contactForm) return '';
+  const live = !x.preview && m.siteId && m.formAction;
+  const dis = live ? '' : ' disabled';
+  const note = x.preview ? '<p class="note">（預覽：正式網站上可以送出）</p>' : (!live ? '<p class="note">（示範網站：此表單不會送出）</p>' : '');
+  const h = mode === 'page' ? 'h2' : 'h2';
+  return '<section id="contact"><div class="wrap"><' + h + '>留言給我們</' + h + '><p>有任何問題都可以留言，我們會盡快用你留下的聯絡方式回覆。</p>' + note +
+    '<form class="contact-form" method="post" action="' + esc(live ? m.formAction : '#') + '">' +
+    (live ? '<input type="hidden" name="site" value="' + esc(m.siteId) + '">' : '') +
+    '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
+    '<p><label for="cf-name">姓名</label><input id="cf-name" name="name" type="text" maxlength="60" required autocomplete="name"' + dis + '></p>' +
+    '<p><label for="cf-contact">Email 或電話</label><input id="cf-contact" name="contact" type="text" maxlength="120" required autocomplete="email"' + dis + '></p>' +
+    '<p><label for="cf-message">留言內容</label><textarea id="cf-message" name="message" rows="5" maxlength="2000" required' + dis + '></textarea></p>' +
+    '<p><button class="btn" type="submit"' + dis + '>送出留言</button></p>' +
+    '<p class="note">你填寫的資料只會寄給' + x.name + '，用來回覆你的留言。</p></form></div></section>';
 }
 
 // ── 雜誌式首頁 ──
@@ -239,17 +284,18 @@ function magazineMain(x, multi) {
   const q = (t) => (/[？?]$/.test(t) ? t : t + '？');
   const faqBody = faqList.map((i) => '<div class="qa"><h3>' + esc(q(i.q)) + '</h3><p>' + esc(i.a) + '</p></div>').join('') +
     (multi && x.on('faq') && x.faq.length > FAQ_TEASER ? more(x, 'faq', '看所有問題') : '');
-  const blocks = [heroSec(x), splitBlock(x, 'about', '關於' + x.name, aboutBody, rooms[0], 'room-1', 'right')];
+  const blocks = [heroSec(x), splitBlock(x, 'about', '關於' + x.name, aboutBody, rooms[0], 'room-1', 'right'), videoSec(x)];
   if (s.menu && x.menu.length) blocks.push(splitBlock(x, 'menu', esc(x.t.offer.label), menuBody, rooms[1], 'room-2', 'left'));
+  blocks.push(reviewsSec(x));
   if (s.faq && x.faq.length) blocks.push(splitBlock(x, 'faq', '常見問題', faqBody, rooms[2], 'room-3', 'right'));
   blocks.push(infoBand(x));
   if (s.interior) blocks.push(photoStrip(x, rooms.slice(3), 4));
   if (multi) {
     if (x.on('news') && s.news) blocks.push(newsSec(x, 'teaser'));
-    if (!x.on('visit')) blocks.push(visitSec(x, 'section'));
+    if (!x.on('visit')) blocks.push(visitSec(x, 'section'), contactSec(x, 'section'));
   } else {
     if (s.news) blocks.push(newsSec(x, 'section'));
-    blocks.push(visitSec(x, 'section'));
+    blocks.push(visitSec(x, 'section'), contactSec(x, 'section'));
   }
   return blocks;
 }
@@ -257,19 +303,21 @@ function magazineMain(x, multi) {
 // 一頁版：全部區塊在首頁
 function singleMain(x) {
   const s = x.m.show;
-  return [heroSec(x), aboutSec(x, 'section'), s.menu ? menuSec(x, 'section') : '', s.interior ? interiorSec(x, 'section') : '',
-    s.news ? newsSec(x, 'section') : '', s.faq ? faqSec(x, 'section') : '', visitSec(x, 'section')];
+  return [heroSec(x), aboutSec(x, 'section'), videoSec(x), s.menu ? menuSec(x, 'section') : '', s.interior ? interiorSec(x, 'section') : '',
+    reviewsSec(x), s.news ? newsSec(x, 'section') : '', s.faq ? faqSec(x, 'section') : '', visitSec(x, 'section'), contactSec(x, 'section')];
 }
 
 // 多頁版首頁：主視覺 + 各頁摘要（頁面有開才放）；來店資訊頁沒開時把完整資訊放首頁
 function multiHomeMain(x) {
   const s = x.m.show;
-  return [heroSec(x), aboutSec(x, 'teaser'),
+  return [heroSec(x), aboutSec(x, 'teaser'), videoSec(x),
     x.on('menu') && s.menu ? menuSec(x, 'teaser') : '',
     x.on('interior') && s.interior ? interiorSec(x, 'teaser') : '',
+    reviewsSec(x),
     x.on('news') && s.news ? newsSec(x, 'teaser') : '',
     x.on('faq') && s.faq ? faqSec(x, 'teaser') : '',
-    x.on('visit') ? visitSec(x, 'teaser') : visitSec(x, 'section')];
+    x.on('visit') ? visitSec(x, 'teaser') : visitSec(x, 'section'),
+    x.on('visit') ? '' : contactSec(x, 'section')];
 }
 
 function multiPageMain(x, key) {
@@ -278,7 +326,8 @@ function multiPageMain(x, key) {
     news: () => newsSec(x, 'page'), faq: () => faqSec(x, 'page'), visit: () => visitSec(x, 'page') }[key];
   // 其他頁面也放幾題常見問題（只顯示，不重複標記 FAQPage；完整標記在常見問題頁）
   const faqTeaser = key !== 'faq' && x.on('faq') && x.m.show.faq && x.faq.length ? faqSec(x, 'teaser') : '';
-  return [pageHead(x, title, key), body(), faqTeaser, key === 'visit' ? '' : contactStrip(x)];
+  const extra = key === 'about' ? [videoSec(x), reviewsSec(x)] : key === 'visit' ? [contactSec(x, 'page')] : [];
+  return [pageHead(x, title, key), body(), ...extra, faqTeaser, key === 'visit' ? '' : contactStrip(x)];
 }
 
 // 區塊交替底色、捲動進場動態（首屏不套用，避免拖慢 LCP）
@@ -298,7 +347,24 @@ const SCRIPT = '<script>(function(){var d=document.documentElement,b=document.qu
   'if("IntersectionObserver"in window&&!matchMedia("(prefers-reduced-motion: reduce)").matches){d.classList.add("js-rv");' +
   'var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{rootMargin:"0px 0px -8% 0px"});' +
   'document.querySelectorAll(".rv").forEach(function(el){if(el.getBoundingClientRect().top<innerHeight)el.classList.add("in");io.observe(el)});' +
-  'addEventListener("beforeprint",function(){document.querySelectorAll(".rv").forEach(function(el){el.classList.add("in")})})}})();</script>';
+  'addEventListener("beforeprint",function(){document.querySelectorAll(".rv").forEach(function(el){el.classList.add("in")})})}' +
+  // 影片、地圖：點了才換成內嵌播放器
+  'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("[data-embed]");if(!a)return;e.preventDefault();var f=document.createElement("iframe");' +
+  'f.src=a.getAttribute("data-embed");f.title=a.getAttribute("data-title")||"";f.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";f.allowFullscreen=true;f.className="embed "+a.className.replace("embed-load","");a.replaceWith(f)})' +
+  '})();</script>';
+
+// 瀏覽次數（自家統計，不用 Cookie、不記錄個人資料）與選用的 Google Analytics（第一次互動或 6 秒後才載入，避免拖慢首屏）
+function trackers(m) {
+  if (m.preview) return '';
+  let out = '';
+  if (m.siteId && m.hitUrl) out += '<script>(function(){try{var u=' + JSON.stringify(m.hitUrl) + ',b=JSON.stringify({s:' + JSON.stringify(m.siteId) + ',p:location.pathname});' +
+    'if(navigator.sendBeacon)navigator.sendBeacon(u,b);else fetch(u,{method:"POST",body:b,keepalive:true})}catch(e){}})();</script>\n';
+  const ga = m.content.ga4;
+  if (ga) out += '<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config",' + JSON.stringify(ga) + ');' +
+    '(function(){var l=0;function go(){if(l)return;l=1;var s=document.createElement("script");s.async=true;s.src="https://www.googletagmanager.com/gtag/js?id=' + ga + '";document.head.appendChild(s)}' +
+    '["scroll","click","keydown","touchstart"].forEach(function(t){addEventListener(t,go,{once:true,passive:true})});setTimeout(go,6000)})();</script>\n';
+  return out;
+}
 
 function render(m) {
   const x = ctx(m);
@@ -320,7 +386,7 @@ function render(m) {
     '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : '#top') + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
     '<nav id="site-nav" aria-label="頁面選單">' + nav + '</nav></div></header>\n' +
-    '<main id="main">\n' + finish(main) + '\n</main>\n' + footer + '\n' + SCRIPT + '\n</body>\n</html>\n';
+    '<main id="main">\n' + finish(main) + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + trackers(m) + '</body>\n</html>\n';
 }
 
 // 404 頁：不存在的網址回傳真正的 404（避免「軟 404」被當成重複首頁收錄）。
@@ -339,10 +405,23 @@ function renderNotFound(m) {
     '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
 }
 
+// 聯絡表單送出後的感謝頁（noindex、不列入 sitemap）
+function renderThanks(m) {
+  const c = m.content;
+  const name = c.name ? esc(c.name) : '';
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    '<title>已收到你的留言' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
+    '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
+    '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
+    '<main id="main"><section class="page-head"><div class="wrap"><h1>謝謝你的留言</h1>' +
+    '<p class="lead">我們已經收到，會盡快用你留下的聯絡方式回覆你。</p><p class="more"><a href="/">回首頁</a></p></div></section></main>\n' +
+    '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
+}
+
 // 依行業設定產生版型物件：版面與流程全行業共用，只有用詞與 schema.org 類型不同
 export function makeTemplate(industry) {
   return {
     id: industry.key, label: industry.label, kindLabel: industry.kindLabel, schemaType: industry.schemaType,
-    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound
+    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound, renderThanks
   };
 }

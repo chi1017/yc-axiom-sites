@@ -27,6 +27,14 @@ export async function buildDemo({ layout, homeStyle, siteUrl, outDir }) {
   const content = JSON.parse(JSON.stringify(sample.content));
   content.heroStyle = 'full';
   if (homeStyle) content.homeStyle = homeStyle;
+  // 展示新功能：客人評價、Google 地圖（點了才載入）、聯絡表單（示範站不會送出）
+  content.reviews = [
+    { name: '常客 林小姐', text: '平日下午來最舒服，窗邊的位子曬得到太陽，手沖每次都會跟我聊今天的豆子。' },
+    { name: '附近上班族', text: '午休會外帶冰滴，甜點是自己烤的，司康外酥內軟，週末常常賣完。' },
+    { name: '第一次來訪的旅客', text: '巷子裡很安靜，店員推薦的淺焙單品很順口，下次來高雄還會再來。' }
+  ];
+  content.showMap = true;
+  content.contactForm = true;
   const dims = (f) => (/room-(2|5)/.test(f) ? { w: 1200, h: 1600 } : f === 'hero' ? { w: 1600, h: 1067 } : { w: 1600, h: 1200 });
   const alt = (f) => (DEMO_PHOTOS.find((p) => p.file === f + '.webp') || {}).alt || '';
   content.photos.hero = { path: 'demo/hero.webp', ...dims('hero'), alt: alt('hero') };
