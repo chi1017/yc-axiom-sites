@@ -42,6 +42,13 @@ function img(x, role, p, alt, eager, sizes = SZ.half) {
     // 非首屏照片標低優先，避免和主視覺（LCP）搶頻寬
     (eager === 'high' ? ' fetchpriority="high" decoding="async"' : eager ? ' decoding="async"' : ' loading="lazy" fetchpriority="low" decoding="async"') + '>';
 }
+// 區塊標題＋選填的副標題（編輯器「首頁區塊順序」裡填）
+const CHIP = { about: 'ABOUT', video: 'VIDEO', menu: 'MENU', interior: 'SPACE', shop: 'SHOP', reviews: 'VOICES', news: 'NEWS', posts: 'JOURNAL', faq: 'Q&A', booking: 'BOOKING', visit: 'VISIT', contact: 'CONTACT' };
+function secHead(x, key, title) {
+  const sub = x.c.subs && x.c.subs[key];
+  const chip = x.c.style.head === 'chip' ? '<span class="sec-chip" aria-hidden="true">' + CHIP[key] + '</span>' : '';
+  return chip + '<h2 class="sec-title">' + title + '</h2>' + (sub ? '<p class="sec-sub">' + esc(sub) + '</p>' : '');
+}
 const more = (x, key, text) => '<p class="more"><a href="' + esc(x.m.href(key)) + '">' + text + '</a></p>';
 
 // ── 首頁主視覺 ──
@@ -118,7 +125,7 @@ function aboutSec(x, mode) {
       autoAbout(x).map((p) => '<p>' + p + '</p>').join('');
   }
   const photo = mode === 'page' && c.photos.room[0];
-  const h = mode === 'page' ? '' : '<h2>關於' + x.name + '</h2>';
+  const h = mode === 'page' ? '' : secHead(x, 'about', '關於' + x.name);
   if (photo) {
     return '<section class="about split" id="about"><div class="wrap split-grid"><div>' + body + '</div><figure>' +
       img(x, 'room-1', photo, x.nm + ' ' + x.t.space.label + ' 1', 'high') + '</figure></div></section>';
@@ -137,7 +144,7 @@ function menuSec(x, mode) {
       list.map((i) => '<tr><th scope="row">' + (i.name ? esc(i.name) : x.ph(x.t.offer.item + '名稱')) + '</th><td>' + (i.price != null ? 'NT$ ' + i.price : x.ph('價格')) + '</td></tr>').join('') +
       '</tbody></table><p class="note">' + esc(x.t.offer.note) + '</p></div></section>';
   }
-  return '<section id="menu"><div class="wrap"><h2>' + esc(x.t.offer.label) + '</h2><ul class="menu">' +
+  return '<section id="menu"><div class="wrap">' + secHead(x, 'menu', esc(x.t.offer.label)) + '<ul class="menu' + (x.c.style.menuStyle === 'cards' ? ' cards' : '') + '">' +
     list.map((i) => '<li><span>' + (i.name ? esc(i.name) : x.ph(x.t.offer.item + '名稱')) + '</span><span class="price">' +
       (i.price != null ? 'NT$ ' + i.price : x.ph('價格')) + '</span></li>').join('') + '</ul>' +
     (mode === 'teaser' ? more(x, 'menu', esc(x.t.offer.more)) : '<p class="note">' + esc(x.t.offer.note) + '</p>') + '</div></section>';
@@ -150,7 +157,7 @@ function interiorSec(x, mode) {
   // 照片頁：前幾張（首屏內）直接載入，其餘延遲載入，避免同時下載搶頻寬拖慢首屏；其他頁的照片都延遲載入
   const figs = list.map((p, i) => '<figure>' + img(x, 'room-' + (i + 1), p, x.nm + ' ' + x.t.space.label + ' ' + (i + 1), mode === 'page' && i < EAGER_GALLERY, SZ.third) + '</figure>');
   if (!rooms.length && x.preview) for (let i = 0; i < 3; i++) figs.push('<figure><div class="ph-img">[照片 ' + (i + 1) + ']</div></figure>');
-  return '<section id="interior"><div class="wrap">' + (mode === 'page' ? '' : '<h2>' + esc(x.t.space.label) + '</h2>') + '<div class="gallery">' + figs.join('') + '</div>' +
+  return '<section id="interior"><div class="wrap">' + (mode === 'page' ? '' : secHead(x, 'interior', esc(x.t.space.label))) + '<div class="gallery' + (x.c.style.gallery !== 'masonry' ? ' ' + x.c.style.gallery : '') + '">' + figs.join('') + '</div>' +
     (mode === 'teaser' ? more(x, 'interior', esc(x.t.space.more)) : '') + '</div></section>';
 }
 
@@ -158,7 +165,7 @@ function interiorSec(x, mode) {
 function newsSec(x, mode) {
   const items = x.news.length ? x.news : (x.preview ? [{ date: '', title: '' }, { date: '', title: '' }] : []);
   const list = mode === 'teaser' ? items.slice(0, 2) : items;
-  return '<section id="news"><div class="wrap">' + (mode === 'page' ? '' : '<h2>最新消息</h2>') + '<ul class="news">' +
+  return '<section id="news"><div class="wrap">' + (mode === 'page' ? '' : secHead(x, 'news', '最新消息')) + '<ul class="news">' +
     list.map((i) => '<li>' + (i.date ? '<time datetime="' + esc(i.date) + '">' + esc(i.date.replace(/-/g, '/')) + '</time>' : '<span>' + x.ph('日期') + '</span>') +
       '<span>' + (i.title ? esc(i.title) : x.ph('消息標題')) + '</span></li>').join('') + '</ul>' +
     (mode === 'teaser' ? more(x, 'news', '所有消息') : '') + '</div></section>';
@@ -170,7 +177,7 @@ function faqSec(x, mode) {
   const q = (s) => (/[？?]$/.test(s) ? s : s + '？');
   const hq = mode === 'page' ? 'h2' : 'h3';
   const list = mode === 'teaser' ? items.slice(0, FAQ_TEASER) : items;
-  return '<section id="faq"><div class="wrap">' + (mode === 'page' ? '' : '<h2>常見問題</h2>') +
+  return '<section id="faq"><div class="wrap">' + (mode === 'page' ? '' : secHead(x, 'faq', '常見問題')) +
     list.map((i) => '<div class="faq-item"><' + hq + '>' + (i.q ? esc(q(i.q)) : x.ph('你的問題')) + '</' + hq + '><p>' + (i.a ? esc(i.a) : x.ph('你的回答')) + '</p></div>').join('') +
     (mode === 'teaser' && items.length > FAQ_TEASER ? more(x, 'faq', '看所有問題') : '') + '</div></section>';
 }
@@ -181,7 +188,7 @@ function visitSec(x, mode) {
   const hasHours = hasAnyHours(c.hours);
   const addrDd = c.address ? esc(c.address) + (x.mapUrl ? '（<a href="' + esc(x.mapUrl) + '" target="_blank" rel="noopener noreferrer">Google 地圖</a>）' : '') : x.ph(PH_ADDR);
   const telDd = c.phone ? (x.tel ? '<a href="' + esc(x.tel) + '">' + esc(c.phone) + '</a>' : esc(c.phone)) : x.ph(PH_PHONE);
-  const h2 = mode === 'page' ? '' : '<h2>' + esc(x.t.visit.label) + '</h2>';
+  const h2 = mode === 'page' ? '' : secHead(x, 'visit', esc(x.t.visit.label));
   if (mode === 'teaser') {
     return '<section id="visit"><div class="wrap">' + h2 + '<dl class="info"><dt>地址</dt><dd>' + addrDd + '</dd><dt>電話</dt><dd>' + telDd + '</dd>' +
       (hasHours ? '<dt>營業時間</dt><dd>' + esc(hoursSummary(c.hours)) + '</dd>' : '') + '</dl>' + more(x, 'visit', '交通與完整營業時間') + '</div></section>';
@@ -213,7 +220,7 @@ const excerpt = (body, n) => { const t = String(body || '').replace(/\s+/g, ' ')
 function postsSec(x, mode) {
   const list = mode === 'teaser' ? x.posts.slice(0, 3) : x.posts;
   if (!list.length) return '';
-  return '<section id="posts"><div class="wrap">' + (mode === 'page' ? '' : '<h2>文章</h2>') + '<ul class="posts">' +
+  return '<section id="posts"><div class="wrap">' + (mode === 'page' ? '' : secHead(x, 'posts', '文章')) + '<ul class="posts">' +
     list.map((p) => '<li><a href="' + esc(x.m.postHref(p.id)) + '"><h3>' + esc(p.title) + '</h3></a>' + (p.date ? '<time datetime="' + esc(p.date) + '">' + esc(ymd(p.date)) + '</time>' : '') +
       '<p>' + esc(excerpt(p.body, 80)) + '</p></li>').join('') + '</ul>' +
     (mode === 'teaser' && x.posts.length > 3 ? '<p class="more"><a href="' + esc(x.m.postsHref) + '">看所有文章</a></p>' : '') + '</div></section>';
@@ -229,7 +236,7 @@ function postMain(x, post) {
 // ── 客人評價（只顯示，不加 Review 結構化資料：店家自己放的評價不符合搜尋引擎的評價標記規範）──
 function reviewsSec(x) {
   if (!x.reviews.length) return '';
-  return '<section id="reviews"><div class="wrap"><h2>客人評價</h2><div class="reviews">' +
+  return '<section id="reviews"><div class="wrap">' + secHead(x, 'reviews', '客人評價') + '<div class="reviews' + (x.c.style.reviewStyle === 'quote' ? ' quote' : '') + '">' +
     x.reviews.map((r) => '<figure class="review"><blockquote><p>' + esc(r.text) + '</p></blockquote>' + (r.name ? '<figcaption>— ' + esc(r.name) + '</figcaption>' : '') + '</figure>').join('') +
     '</div></div></section>';
 }
@@ -238,7 +245,7 @@ function reviewsSec(x) {
 function videoSec(x) {
   const id = youtubeId(x.c.video);
   if (!id) return '';
-  return '<section id="video"><div class="wrap"><h2>影片介紹</h2><a class="embed-load yt" href="https://www.youtube.com/watch?v=' + id + '" target="_blank" rel="noopener noreferrer" ' +
+  return '<section id="video"><div class="wrap">' + secHead(x, 'video', '影片介紹') + '<a class="embed-load yt" href="https://www.youtube.com/watch?v=' + id + '" target="_blank" rel="noopener noreferrer" ' +
     'data-embed="https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1" data-title="' + esc(x.nm) + ' 影片">' +
     '<img src="https://i.ytimg.com/vi/' + id + '/hqdefault.jpg" alt="' + esc(x.nm) + ' 影片" width="480" height="360" loading="lazy" decoding="async"><span class="play" aria-hidden="true"></span><span class="sr">播放影片</span></a></div></section>';
 }
@@ -259,8 +266,7 @@ function contactSec(x, mode) {
   const live = !x.preview && m.siteId && m.formAction;
   const dis = live ? '' : ' disabled';
   const note = x.preview ? '<p class="note">（預覽：正式網站上可以送出）</p>' : (!live ? '<p class="note">（示範網站：此表單不會送出）</p>' : '');
-  const h = mode === 'page' ? 'h2' : 'h2';
-  return '<section id="contact"><div class="wrap"><' + h + '>留言給我們</' + h + '><p>有任何問題都可以留言，我們會盡快用你留下的聯絡方式回覆。</p>' + note +
+  return '<section id="contact"><div class="wrap">' + secHead(x, 'contact', '留言給我們') + '<p>有任何問題都可以留言，我們會盡快用你留下的聯絡方式回覆。</p>' + note +
     '<form class="contact-form" method="post" action="' + esc(live ? m.formAction : '#') + '">' +
     (live ? '<input type="hidden" name="site" value="' + esc(m.siteId) + '">' : '') +
     '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
@@ -285,7 +291,7 @@ function shopSec(x, mode) {
     (i.desc ? '<p class="desc">' + esc(i.desc) + '</p>' : '<p class="desc"></p>') +
     (mode === 'teaser' ? '' : '<p><button class="btn small" type="button" data-add="' + esc(i.id) + '"' + (live ? '' : ' disabled') + '>加入訂購</button></p>') + '</div></li>';
   const grid = '<ul class="shop-grid">' + list.map(card).join('') + '</ul>';
-  const title = mode === 'page' ? '' : '<h2>線上購買</h2>';
+  const title = mode === 'page' ? '' : secHead(x, 'shop', '線上購買');
   if (mode === 'teaser') return '<section id="shop"><div class="wrap">' + title + grid + '<p class="more"><a href="' + esc(m.shopHref) + '">前往線上購買</a></p></div></section>';
   const note = c.shop.note ? '<p class="note">' + esc(c.shop.note) + '</p>' : '';
   if (!live) {
@@ -330,7 +336,7 @@ function bookingSec(x) {
   const hs = hasAnyHours(c.hours) ? '<p class="note">營業時間：' + esc(hoursSummary(c.hours)) + '</p>' : '';
   const dep = c.bookingDeposit && (x.preview || m.payReady) ? c.bookingDeposit : 0;
   const depNote = dep ? '<p><b>預約需先付訂金 ' + money(dep) + '</b>，送出後會前往付款頁，付款完成才算送出預約申請。</p>' : '';
-  return '<section id="booking"><div class="wrap"><h2>線上預約</h2><p>填寫想預約的日期與時間，送出後我們會盡快與你聯絡確認，確認後才算預約成功。</p>' + depNote + hs + note +
+  return '<section id="booking"><div class="wrap">' + secHead(x, 'booking', '線上預約') + '<p>填寫想預約的日期與時間，送出後我們會盡快與你聯絡確認，確認後才算預約成功。</p>' + depNote + hs + note +
     '<form class="contact-form" method="post" action="' + esc(live ? m.bookingAction : '#') + '">' +
     (live ? '<input type="hidden" name="site" value="' + esc(m.siteId) + '">' : '') +
     '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
@@ -510,7 +516,7 @@ function render(m) {
   const footNav = multi ? '<nav class="foot-nav" aria-label="頁尾選單"><a href="' + esc(m.href('home')) + '">首頁</a>' + navItems.map((i) => '<a href="' + esc(i[2]) + '">' + i[1] + '</a>').join('') + '</nav>' : '';
   const enLink = c.en.enabled && c.en.name && c.en.intro && m.enHref ? '<a class="lang-link" href="' + esc(m.enHref) + '" hreflang="en" lang="en">English</a>' : '';
   const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + (enLink ? '　' + enLink : '') + '</span>' + footNav + '</div></footer>';
-  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body>\n' +
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body class="' + bodyClass(c) + '">\n' +
     '<a class="skip" href="#main">跳到主要內容</a>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : (anchor || '#top')) + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
@@ -608,6 +614,11 @@ function renderOrderDone(m) {
 function cssOpts(m) {
   const st = (m.content && m.content.style) || {};
   return { headingFont: m.headingFont, font: st.font, button: st.button, fontUrl: m.previewFontUrl || '' };
+}
+// 外觀細節用 body 的 class 切換（標題裝飾線、背景紋理、捲動動畫）
+function bodyClass(c) {
+  const st = c.style || {};
+  return ['hd-' + (st.head || 'plain'), st.texture && st.texture !== 'none' ? 'tex-' + st.texture : '', 'mo-' + (st.motion || 'rise')].filter(Boolean).join(' ');
 }
 // LINE 浮動按鈕（需要先填 LINE 連結）；頁面有購物車列時往上移，避免重疊
 function floatLine(m, body) {

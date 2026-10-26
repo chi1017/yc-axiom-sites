@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { PALETTES, PALETTE_IDS, derivePalette, contrast, customPaletteId, parseCustomPalette, isValidPaletteId, getPalette } from '../templates/shared/palettes.js';
 import { normalizePalette } from '../templates/shared/content.js';
 
-test('there are 12 built-in palettes and each is readable', () => {
-  assert.equal(PALETTE_IDS.length, 12);
+test('there are 16 built-in palettes and each is readable', () => {
+  assert.equal(PALETTE_IDS.length, 16);
   for (const id of PALETTE_IDS) {
     const p = PALETTES[id];
     assert.ok(contrast(p.text, p.bg) >= 7, id + ' text/bg');

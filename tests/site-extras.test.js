@@ -284,3 +284,19 @@ test('style: heading font stack and button shape; LINE float button needs a LINE
   const v = validateForPublish(normalizeContent({ ...base, social: {}, style: { floatLine: true } }), normalizeSections({}), 'shop', {}, {});
   assert.ok(v.errors.some((e) => e.field === 'social.line'));
 });
+
+test('look: subtitles, heading line, texture, motion and section layouts are CSS-only switches', () => {
+  const content = { name: '小日子', address: '高雄市苓雅區四維三路100號', menu: [{ name: '拿鐵', price: 120 }], reviews: [{ name: 'A', text: '好喝' }],
+    photos: { hero: { path: 'a/h.webp' }, room: [{ path: 'a/r.webp' }] },
+    subs: { menu: '每天現煮', bogus: 'x' }, style: { texture: 'contour', motion: 'fade', head: 'num', menuStyle: 'cards', gallery: 'slide', reviewStyle: 'quote' } };
+  const r = buildSite({ template: 'cafe', content, palette: 'lake', siteUrl: 'https://x.pages.dev/' });
+  assert.match(r.html, /<body class="hd-num tex-contour mo-fade">/);
+  assert.match(r.html, /<h2 class="sec-title">菜單與價格<\/h2><p class="sec-sub">每天現煮<\/p><ul class="menu cards">/);
+  assert.match(r.html, /class="gallery slide"/); assert.match(r.html, /class="reviews quote"/);
+  assert.match(r.html, /tex-contour section\.alt\{background-image:url\("data:image\/svg\+xml/);
+  assert.ok(!/<script[^>]*src=/.test(r.html), 'no external scripts');
+  const n = normalizeContent({ style: { texture: 'mountain', head: 'bad' } });
+  assert.equal(n.style.texture, 'none'); assert.equal(n.style.head, 'plain'); assert.deepEqual(normalizeContent({ subs: { menu: '  ' } }).subs, {});
+  const plain = buildSite({ template: 'cafe', content: { name: 'x' }, siteUrl: 'https://x.pages.dev/' });
+  assert.match(plain.html, /<body class="hd-plain mo-rise">/);
+});

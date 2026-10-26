@@ -11,6 +11,10 @@ const RADIUS = { pill: '999px', round: '10px', square: '2px' };
 export function baseCss(c, { headingFont = false, font = 'serif', button = 'pill', fontUrl = '' } = {}) {
   const src = headingFont ? '/fonts/heading.woff2' : fontUrl;
   const stack = FONT_STACKS[font] || FONT_STACKS.serif;
+  // 等高線紋理：用主色畫的小 SVG（約 0.6 KB），疊在交錯底色區塊的右上角
+  const hex = String(c.accent || '#888888').replace('#', '%23');
+  const contour = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' fill='none' stroke='" + hex + "' stroke-opacity='.16'%3E%3Cpath d='M400 40c-60 10-90 60-150 50S160 20 90 40 10 120 0 130'/%3E%3Cpath d='M400 90c-50 10-80 55-140 48S170 70 100 90 30 160 0 175'/%3E%3Cpath d='M400 140c-45 12-70 50-130 46S180 120 115 140 45 200 0 220'/%3E%3Cpath d='M400 190c-40 12-62 46-122 44S190 170 130 190 60 240 0 265'/%3E%3Cpath d='M400 240c-35 12-55 42-112 42S200 220 145 240 75 280 0 310'/%3E%3C/svg%3E\")";
+  const paper = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
   return (src ? '@font-face{font-family:"SiteHeading";src:url(' + src + ') format("woff2");font-weight:100 900;font-style:normal;font-display:swap}\n' : '') + `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
@@ -224,5 +228,36 @@ h2.big{font-size:clamp(34px,5.2vw,60px);margin-bottom:24px;letter-spacing:.01em}
 .float-line:hover{filter:brightness(1.05)}
 @media(min-width:760px){.img-left .split-grid{grid-template-columns:1fr 1.1fr}.img-left .split-grid>figure{order:-1}}
 @media print{.float-line,.cart-bar{display:none!important}}
+
+/* ── 外觀細節：標題裝飾線、副標題、背景紋理、捲動動畫、區塊排版 ── */
+.hd-num main{counter-reset:sec}
+.hd-num section:not(.hero):not(.page-head) .sec-title::before{counter-increment:sec;content:counter(sec,decimal-leading-zero);display:block;margin-bottom:6px;font:600 14px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.2em;color:var(--accent)}
+.hd-bar .sec-title{padding-left:16px;border-left:6px solid var(--accent);border-radius:2px}
+.sec-chip{display:inline-block;margin-bottom:12px;padding:3px 12px;border-radius:999px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font:700 12px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.16em}
+.sec-sub{margin:-12px 0 28px;color:var(--muted);max-width:42em;font-size:17px}
+.tex-paper section.alt,.tex-paper footer{background-image:${paper}}
+.tex-dots section.alt{background-image:radial-gradient(color-mix(in srgb,var(--accent) 16%,transparent) 1px,transparent 1.4px);background-size:18px 18px}
+.tex-grid section.alt{background-image:linear-gradient(color-mix(in srgb,var(--accent) 8%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--accent) 8%,transparent) 1px,transparent 1px);background-size:28px 28px}
+.tex-glow section.alt{background-image:radial-gradient(60% 80% at 100% 0%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%),radial-gradient(50% 70% at 0% 100%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%)}
+.tex-contour section.alt{background-image:${contour};background-repeat:no-repeat;background-position:top right;background-size:min(520px,70%) auto}
+.js-rv .mo-fade .rv{transform:none}
+.js-rv .mo-zoom .rv{transform:scale(.97)}
+.js-rv .mo-none .rv{opacity:1;transform:none;transition:none}
+.menu.cards{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px}
+.menu.cards li{flex-direction:column;justify-content:flex-start;gap:6px;padding:18px 20px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+.alt .menu.cards li{background:var(--bg)}
+.menu.cards .price{font-size:20px}
+.gallery.grid,.gallery.slide{columns:auto;display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.gallery.grid figure,.gallery.slide figure{margin:0}
+.gallery.grid img,.gallery.grid img.tall{aspect-ratio:1/1}
+.gallery.slide{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:10px;scrollbar-width:thin}
+.gallery.slide figure{flex:0 0 min(82%,440px);scroll-snap-align:start}
+.gallery.slide img,.gallery.slide img.tall{aspect-ratio:4/3}
+.reviews.quote{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:18px;padding-bottom:10px;scrollbar-width:thin}
+.reviews.quote .review{flex:0 0 min(88%,620px);scroll-snap-align:start;text-align:center;padding:36px 32px}
+.reviews.quote .review blockquote p{font-size:20px;line-height:1.7}
+.menu.cards li,.shop-grid li,.review,.faq-item,.gallery figure{transition:transform .2s ease,box-shadow .2s ease}
+.menu.cards li:hover,.shop-grid li:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.10)}
+@media(prefers-reduced-motion:reduce){.menu.cards li:hover,.shop-grid li:hover{transform:none}}
 `;
 }
