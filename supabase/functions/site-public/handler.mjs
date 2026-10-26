@@ -1,9 +1,13 @@
 // 客戶網站對外的 Edge Function（不需登入）：
 //   POST …/site-public/contact  聯絡表單（一般 HTML 表單送出，不需要 JavaScript）→ 存進 site_messages、寄信給店家 → 導回網站的感謝頁
 //   POST …/site-public/booking  線上預約申請（同上，另外檢查日期時間是否在營業時間內）
+//   POST …/site-public/ecpay, ecpay-period, ecpay-info  綠界付款結果通知（驗證檢查碼後自動入帳；同一筆只入帳一次）
 //   POST …/site-public/hit      瀏覽計數（網站用 sendBeacon 送出）→ 每日每頁的次數，不記錄個人資料
 import { UUID } from '../_shared/http.mjs';
 import { checkBooking } from '../../../templates/shared/booking.js';
+import { verifyMac } from '../_shared/ecpay.mjs';
+import { applyPayment } from '../_shared/payment.mjs';
+import { taipeiDate } from '../_shared/dates.mjs';
 
 export const LIMITS = { name: 60, contact: 120, message: 2000, perIpHour: 5, perSiteDay: 100 };
 const LIVE = ['live', 'overdue'];
@@ -46,6 +50,7 @@ export async function handlePublic(req, deps) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'content-type' } });
   if (req.method !== 'POST') return new Response('method not allowed', { status: 405 });
   if (route === 'hit') return hit(req, deps);
+  if (route === 'ecpay' || route === 'ecpay-period' || route === 'ecpay-info') return ecpayNotify(req, deps, route);
   if (route === 'contact') return contact(req, deps, 'message');
   if (route === 'booking') return contact(req, deps, 'booking');
   return new Response('not found', { status: 404 });
@@ -105,4 +110,67 @@ async function contact(req, deps, kind) {
     if (r && r.ok && row && row.id) await deps.db.patch('site_messages', 'id=eq.' + row.id, { emailed: true }).catch(() => {});
   }
   return thanks ? Response.redirect(thanks, 303) : page('已送出', kind === 'booking' ? '已收到你的預約申請，店家確認後會與你聯絡。' : '謝謝你的留言，店家會盡快回覆你。');
+}
+
+// ── 綠界付款通知 ──
+// 回 "1|OK" 表示收到；驗證失敗回 "0|…"。入帳用條件式更新（樂觀鎖），重複通知或同時到達都只會入帳一次。
+const text = (t) => new Response(t, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+async function ecpayNotify(req, deps, route) {
+  const cfg = deps.ecpay;
+  if (!cfg) return text('0|not configured');
+  let f;
+  try { const t = await req.text(); if (t.length > 8000) return text('0|too large'); f = Object.fromEntries(new URLSearchParams(t)); } catch { return text('0|bad request'); }
+  if (!(await verifyMac(f, cfg))) return text('0|CheckMacValue Error');
+  if (f.MerchantID !== cfg.merchantId) return text('0|MerchantID Error');
+  const { db } = deps;
+  const tradeNo = String(f.MerchantTradeNo || '');
+  if (!/^[A-Za-z0-9]{1,20}$/.test(tradeNo)) return text('0|bad trade no');
+  const order = await db.getOne('pay_orders', 'trade_no=eq.' + tradeNo + '&select=*');
+  if (!order) return text('0|order not found');
+  const now = (deps.now || (() => new Date()))();
+  const notify = { route, RtnCode: f.RtnCode, RtnMsg: String(f.RtnMsg || '').slice(0, 200), TradeNo: f.TradeNo, at: now.toISOString() };
+  const touch = (extra) => db.patch('pay_orders', 'trade_no=eq.' + tradeNo, { last_notify: notify, updated_at: now.toISOString(), ...extra }).catch(() => {});
+  const event = (type, detail) => db.insert('site_events', { site_id: order.site_id, type, detail: { ...detail, trade_no: tradeNo, by: 'ecpay' } }).catch(() => {});
+  // 正式環境收到「模擬付款」不入帳
+  if (cfg.mode === 'prod' && f.SimulatePaid === '1') { await touch({}); return text('1|OK'); }
+
+  if (route === 'ecpay-info') {
+    // ATM 取號：記下銀行代碼、虛擬帳號、繳費期限（會員專區會顯示）
+    if (order.status === 'created') await touch({ status: 'atm_issued', atm: { bank: f.BankCode || '', account: f.vAccount || '', expire: f.ExpireDate || '' } });
+    return text('1|OK');
+  }
+  const site = await db.getOne('rental_sites', 'id=eq.' + order.site_id + '&select=*');
+  if (!site) { await touch({}); return text('1|OK'); }
+  const today = taipeiDate(now);
+  const credit = (months, method, amount) => applyPayment({ db, site, siteId: site.id, amount, months, method, reference: '綠界 ' + String(f.TradeNo || tradeNo).slice(0, 40) + (order.test ? '（測試）' : ''),
+    paidOn: today, by: 'ecpay', today, event, queueDeploy: async ({ versionId }) => {
+      const d = await deps.dispatch({ siteId: site.id, versionId }).catch((e) => ({ ok: false, error: String(e) }));
+      if (!d.ok) await event('deploy_failed', { message: '無法啟動部署：' + String(d.error || '').slice(0, 200), ...(versionId ? { version_id: versionId } : {}) });
+      return d;
+    }, sendMail: deps.sendMail, deployWarn: '自動部署沒有啟動，請到後台按重新發佈。' });
+
+  if (f.RtnCode !== '1') {
+    await touch(order.kind === 'card_monthly' && order.status === 'active' ? {} : (order.status === 'created' ? { status: 'failed' } : {}));
+    await event(route === 'ecpay-period' ? 'recurring_failed' : 'payment_failed', { code: f.RtnCode, message: notify.RtnMsg });
+    return text('1|OK');
+  }
+  const paidAmount = Number(route === 'ecpay-period' ? f.Amount : f.TradeAmt);
+  if (paidAmount !== order.amount) { await touch({}); await event('payment_mismatch', { expected: order.amount, got: paidAmount }); return text('1|OK'); }
+
+  if (order.kind === 'card_monthly') {
+    // 第一次授權（ReturnURL）與之後每期（PeriodReturnURL）都用「累計成功次數」對帳，只補入還沒入帳的次數
+    const times = route === 'ecpay-period' ? Math.max(1, parseInt(f.TotalSuccessTimes || '0', 10) || 0) : 1;
+    const prev = order.success_times, amount = order.amount;
+    if (times <= prev) { await touch({}); return text('1|OK'); }
+    const won = await db.patchReturning('pay_orders', 'trade_no=eq.' + tradeNo + '&success_times=eq.' + prev, { success_times: times, status: order.status === 'cancelled' ? 'cancelled' : 'active', last_notify: notify, updated_at: now.toISOString() });
+    if (!won.length) return text('1|OK');
+    await credit(times - prev, 'credit_recurring', amount * (times - prev));
+    return text('1|OK');
+  }
+  // 一次付清（信用卡、ATM）
+  const { months, kind, amount } = order;
+  const won = await db.patchReturning('pay_orders', 'trade_no=eq.' + tradeNo + '&status=in.(created,atm_issued,failed)', { status: 'paid', last_notify: notify, updated_at: now.toISOString() });
+  if (!won.length) return text('1|OK');
+  await credit(months, kind === 'atm' ? 'atm' : 'credit', amount);
+  return text('1|OK');
 }

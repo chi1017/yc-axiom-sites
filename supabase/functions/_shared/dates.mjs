@@ -9,3 +9,10 @@ export function diffDays(a, b) { return dayNum(b) - dayNum(a); }
 export function weekdayOf(s) { return new Date(s + 'T00:00:00Z').getUTCDay(); }
 export const firstOfMonth = (s) => s.slice(0, 8) + '01';
 export function prevMonthFirst(s) { const [y, m] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10); }
+// 加月份；月底會往前收（1/31 + 1 個月 = 2/28）
+export function addMonths(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const first = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(d, last))).toISOString().slice(0, 10);
+}

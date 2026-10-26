@@ -127,6 +127,65 @@ async function domainAction(action, ctx) {
   return fail("bad_request", "不支援的動作");
 }
 
+// supabase/functions/_shared/dates.mjs
+function addMonths(dateStr, n) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const first = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(d, last))).toISOString().slice(0, 10);
+}
+
+// supabase/functions/_shared/payment.mjs
+async function applyPayment({ db: db2, site, siteId, amount, months, method, reference = "", paidOn, by, today, event, queueDeploy, sendMail: sendMail2, deployWarn = "" }) {
+  if (!["pending", "live", "overdue", "suspended"].includes(site.status)) return { ok: false, error: "not_allowed", status: 409, message: site.status === "draft" ? "客戶還沒有送出上線申請" : "這個網站已終止服務，無法收款" };
+  const latestVersion = async () => (await db2.list("site_versions", "site_id=eq." + siteId + "&select=id&order=created_at.desc&limit=1"))[0] || null;
+  let deployVersionId = null;
+  if (site.status === "pending") {
+    const v = await latestVersion();
+    if (!v) return { ok: false, error: "no_version", status: 409, message: "這個網站沒有可上線的版本" };
+    deployVersionId = v.id;
+  }
+  const from = site.paid_until && site.paid_until > today ? site.paid_until : today;
+  const to = addMonths(from, months);
+  const pay = await db2.insertReturning("payments", { site_id: siteId, member_id: site.member_id, amount, months, method, reference: reference || null, paid_on: paidOn, period_from: from, period_to: to, confirmed_by: by });
+  if (!pay) return { ok: false, error: "server_error", status: 500, message: "寫入收款紀錄失敗，請稍後再試" };
+  const newStatus = to >= today ? "live" : "overdue";
+  const patch = { paid_until: to };
+  let needDeploy = false;
+  if (site.status !== newStatus) patch.status = newStatus;
+  if (site.status === "suspended") {
+    patch.suspended_at = null;
+    patch.suspend_reason = null;
+    needDeploy = true;
+    deployVersionId = site.live_version_id || (await latestVersion() || {}).id || null;
+  }
+  if (site.status === "pending") needDeploy = true;
+  try {
+    await db2.patch("rental_sites", "id=eq." + siteId, patch);
+  } catch (e) {
+    await event("payment_confirmed", { payment_id: pay.id, amount, months, period_to: to, method, warning: "收款已記錄，但更新網站狀態失敗" });
+    return { ok: false, error: "server_error", status: 500, message: "收款已記錄，但更新網站狀態失敗。請在詳情頁檢查狀態與到期日。" };
+  }
+  const statusFrom = site.status;
+  Object.assign(site, patch);
+  await event("payment_confirmed", { payment_id: pay.id, amount, months, ...method !== "bank_transfer" ? { method } : {}, period_from: from, period_to: to, status_from: statusFrom, status_to: site.status });
+  let warning = "";
+  if (needDeploy) {
+    if (!deployVersionId) warning = "找不到可部署的版本，請請客戶按一次發佈。";
+    else {
+      const d = await queueDeploy({ versionId: deployVersionId });
+      if (!d.ok) warning = deployWarn;
+    }
+  }
+  const member = await db2.getOne("members", "id=eq." + site.member_id + "&select=email").catch(() => null);
+  if (member && member.email && sendMail2) {
+    const mail = customerReceipt({ shopName: site.content && site.content.name || site.slug, amount, months, paidOn, periodTo: to, reference });
+    const r = await sendMail2({ to: member.email, ...mail }).catch((e) => ({ ok: false, error: String(e) }));
+    await event(r.ok ? "email_sent" : "email_failed", { template: "customerReceipt", ...r.ok ? {} : { error: String(r.error || "").slice(0, 200) } });
+  }
+  return { ok: true, status: patch.status || site.status, paidUntil: to, deploying: needDeploy && !warning, warning, paymentId: pay.id };
+}
+
 // supabase/functions/admin-site/handler.mjs
 var MAX_MONTHS = 60;
 var MAX_AMOUNT = 1e7;
@@ -136,12 +195,6 @@ function taipeiDate(d) {
   return new Date(d.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
 }
 var isDate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + "T00:00:00Z")) && (/* @__PURE__ */ new Date(v + "T00:00:00Z")).toISOString().slice(0, 10) === v;
-function addMonths(dateStr, n) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const first = new Date(Date.UTC(y, m - 1 + n, 1));
-  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(d, last))).toISOString().slice(0, 10);
-}
 async function handleAdmin(req, deps) {
   const cors = corsHeaders(req, deps.allowedOrigins);
   const reply = (b, s) => json(b, s, cors);
@@ -195,49 +248,9 @@ async function handleAdmin(req, deps) {
       const since = new Date(now.getTime() - 60 * 1e3).toISOString();
       const dup = await db2.list("payments", "site_id=eq." + siteId + "&amount=eq." + amount + "&paid_on=eq." + paidOn + "&created_at=gte." + encodeURIComponent(since) + "&select=id&limit=1");
       if (dup.length) return fail("duplicate", "1 分鐘內已有相同的收款紀錄，請勿重複送出", 409);
-      let deployVersionId = null;
-      if (site.status === "pending") {
-        const v = await latestVersion();
-        if (!v) return fail("no_version", "這個網站沒有可上線的版本", 409);
-        deployVersionId = v.id;
-      }
-      const from = site.paid_until && site.paid_until > today ? site.paid_until : today;
-      const to = addMonths(from, months);
-      const pay = await db2.insertReturning("payments", { site_id: siteId, member_id: site.member_id, amount, months, method: "bank_transfer", reference: reference || null, paid_on: paidOn, period_from: from, period_to: to, confirmed_by: by });
-      if (!pay) return fail("server_error", "寫入收款紀錄失敗，請稍後再試", 500);
-      const newStatus = to >= today ? "live" : "overdue";
-      const patch = { paid_until: to };
-      let needDeploy = false;
-      if (site.status !== newStatus) patch.status = newStatus;
-      if (site.status === "suspended") {
-        patch.suspended_at = null;
-        patch.suspend_reason = null;
-        needDeploy = true;
-        deployVersionId = site.live_version_id || (await latestVersion() || {}).id || null;
-      }
-      if (site.status === "pending") needDeploy = true;
-      try {
-        await db2.patch("rental_sites", "id=eq." + siteId, patch);
-      } catch (e) {
-        await event("payment_confirmed", { payment_id: pay.id, amount, months, period_to: to, warning: "收款已記錄，但更新網站狀態失敗" });
-        return fail("server_error", "收款已記錄，但更新網站狀態失敗。請在詳情頁檢查狀態與到期日。", 500);
-      }
-      await event("payment_confirmed", { payment_id: pay.id, amount, months, period_from: from, period_to: to, status_from: site.status, status_to: patch.status || site.status });
-      let warning = "";
-      if (needDeploy) {
-        if (!deployVersionId) warning = "找不到可部署的版本，請請客戶按一次發佈。";
-        else {
-          const d = await queueDeploy({ versionId: deployVersionId });
-          if (!d.ok) warning = deployWarn;
-        }
-      }
-      const member = await db2.getOne("members", "id=eq." + site.member_id + "&select=email").catch(() => null);
-      if (member && member.email) {
-        const mail = customerReceipt({ shopName: site.content && site.content.name || site.slug, amount, months, paidOn, periodTo: to, reference });
-        const r = await deps.sendMail({ to: member.email, ...mail }).catch((e) => ({ ok: false, error: String(e) }));
-        await event(r.ok ? "email_sent" : "email_failed", { template: "customerReceipt", ...r.ok ? {} : { error: String(r.error || "").slice(0, 200) } });
-      }
-      return reply({ ok: true, status: patch.status || site.status, paid_until: to, deploying: needDeploy && !warning, ...warning ? { warning } : {}, message: "已記錄收款，到期日 " + to + (needDeploy && !warning ? "，正在部署（約 1–2 分鐘）。" : "。") + (warning ? " " + warning : "") }, 200);
+      const r = await applyPayment({ db: db2, site, siteId, amount, months, method: "bank_transfer", reference, paidOn, by, today, now, event, queueDeploy, sendMail: deps.sendMail, deployWarn });
+      if (!r.ok) return fail(r.error, r.message, r.status || 500);
+      return reply({ ok: true, status: r.status, paid_until: r.paidUntil, deploying: r.deploying, ...r.warning ? { warning: r.warning } : {}, message: "已記錄收款，到期日 " + r.paidUntil + (r.deploying ? "，正在部署（約 1–2 分鐘）。" : "。") + (r.warning ? " " + r.warning : "") }, 200);
     }
     case "republish": {
       if (site.status === "suspended") {

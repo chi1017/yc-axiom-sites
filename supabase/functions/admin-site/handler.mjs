@@ -4,6 +4,7 @@
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
 import { customerReceipt } from '../_shared/emails.mjs';
 import { normalizeDomain, domainAction } from '../_shared/domain.mjs';
+import { applyPayment } from '../_shared/payment.mjs';
 export { normalizeDomain };
 export { parseOrigins };
 
@@ -89,42 +90,9 @@ export async function handleAdmin(req, deps) {
       const dup = await db.list('payments', 'site_id=eq.' + siteId + '&amount=eq.' + amount + '&paid_on=eq.' + paidOn + '&created_at=gte.' + encodeURIComponent(since) + '&select=id&limit=1');
       if (dup.length) return fail('duplicate', '1 分鐘內已有相同的收款紀錄，請勿重複送出', 409);
 
-      let deployVersionId = null;
-      if (site.status === 'pending') {
-        const v = await latestVersion();
-        if (!v) return fail('no_version', '這個網站沒有可上線的版本', 409);
-        deployVersionId = v.id;
-      }
-      const from = site.paid_until && site.paid_until > today ? site.paid_until : today;
-      const to = addMonths(from, months);
-      const pay = await db.insertReturning('payments', { site_id: siteId, member_id: site.member_id, amount, months, method: 'bank_transfer', reference: reference || null, paid_on: paidOn, period_from: from, period_to: to, confirmed_by: by });
-      if (!pay) return fail('server_error', '寫入收款紀錄失敗，請稍後再試', 500);
-
-      const newStatus = to >= today ? 'live' : 'overdue';
-      const patch = { paid_until: to };
-      let needDeploy = false;
-      if (site.status !== newStatus) patch.status = newStatus;
-      if (site.status === 'suspended') { patch.suspended_at = null; patch.suspend_reason = null; needDeploy = true; deployVersionId = site.live_version_id || (await latestVersion() || {}).id || null; }
-      if (site.status === 'pending') needDeploy = true;
-      try { await db.patch('rental_sites', 'id=eq.' + siteId, patch); } catch (e) {
-        await event('payment_confirmed', { payment_id: pay.id, amount, months, period_to: to, warning: '收款已記錄，但更新網站狀態失敗' });
-        return fail('server_error', '收款已記錄，但更新網站狀態失敗。請在詳情頁檢查狀態與到期日。', 500);
-      }
-      await event('payment_confirmed', { payment_id: pay.id, amount, months, period_from: from, period_to: to, status_from: site.status, status_to: patch.status || site.status });
-
-      let warning = '';
-      if (needDeploy) {
-        if (!deployVersionId) warning = '找不到可部署的版本，請請客戶按一次發佈。';
-        else { const d = await queueDeploy({ versionId: deployVersionId }); if (!d.ok) warning = deployWarn; }
-      }
-      // 收據信：失敗只記錄，不影響收款
-      const member = await db.getOne('members', 'id=eq.' + site.member_id + '&select=email').catch(() => null);
-      if (member && member.email) {
-        const mail = customerReceipt({ shopName: (site.content && site.content.name) || site.slug, amount, months, paidOn, periodTo: to, reference });
-        const r = await deps.sendMail({ to: member.email, ...mail }).catch((e) => ({ ok: false, error: String(e) }));
-        await event(r.ok ? 'email_sent' : 'email_failed', { template: 'customerReceipt', ...(r.ok ? {} : { error: String(r.error || '').slice(0, 200) }) });
-      }
-      return reply({ ok: true, status: patch.status || site.status, paid_until: to, deploying: needDeploy && !warning, ...(warning ? { warning } : {}), message: '已記錄收款，到期日 ' + to + (needDeploy && !warning ? '，正在部署（約 1–2 分鐘）。' : '。') + (warning ? ' ' + warning : '') }, 200);
+      const r = await applyPayment({ db, site, siteId, amount, months, method: 'bank_transfer', reference, paidOn, by, today, now, event, queueDeploy, sendMail: deps.sendMail, deployWarn });
+      if (!r.ok) return fail(r.error, r.message, r.status || 500);
+      return reply({ ok: true, status: r.status, paid_until: r.paidUntil, deploying: r.deploying, ...(r.warning ? { warning: r.warning } : {}), message: '已記錄收款，到期日 ' + r.paidUntil + (r.deploying ? '，正在部署（約 1–2 分鐘）。' : '。') + (r.warning ? ' ' + r.warning : '') }, 200);
     }
 
     case 'republish': {
