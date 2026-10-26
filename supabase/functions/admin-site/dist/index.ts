@@ -398,7 +398,7 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
       return rest("rpc/" + fn, { method: "POST", body: args || {} });
     },
     async count(table, query) {
-      const res = await fetchImpl(base + "/rest/v1/" + table + "?" + query + "&select=id", { method: "HEAD", headers: headers({ Prefer: "count=exact" }) });
+      const res = await fetchImpl(base + "/rest/v1/" + table + "?" + query + "&select=*", { method: "HEAD", headers: headers({ Prefer: "count=exact" }) });
       if (!res.ok) throw new Error("Supabase count " + table + " → " + res.status);
       const m = (res.headers.get("content-range") || "").match(/\/(\d+)$/);
       return m ? Number(m[1]) : 0;
