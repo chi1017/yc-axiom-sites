@@ -22,6 +22,49 @@ const DEMOS = [
 const RETIRED = ['wuhou-cafe-demo-multi', 'wuhou-cafe-demo-magazine'];
 const DEMO_NOTE = '<p class="demo-note" style="margin:8px 0 0;font-size:13px">此為示範網站：店家與內容皆為虛構，照片來自 Unsplash。</p>';
 const noDeploy = process.argv.includes('--no-deploy');
+// --compare：只部署「與 Wix Brew 範本同內容量」的比較用示範站（一頁版、標準首頁：主視覺、介紹、3 張照片、6 個附圖商品、1 個大圖區塊）
+const compareOnly = process.argv.includes('--compare');
+export const COMPARE = { project: 'yc-compare-cafe' };
+
+export async function buildCompare({ siteUrl, outDir }) {
+  const sharp = (await import('sharp')).default;
+  const photo = (f, w, h, alt) => ({ path: 'demo/' + f + '.webp', w, h, alt });
+  const content = {
+    name: '晨焙咖啡', tagline: '當地烘焙的咖啡豆與手沖',
+    intro: '我們的咖啡豆來自世界各地的小農，每週在店裡少量烘焙，保留每支豆子原本的香氣與甜感。\n\n不論是早上外帶一杯濃縮，或是午後坐下來慢慢喝一杯手沖，都歡迎你來。',
+    address: '高雄市苓雅區四維三路100號', phone: '07-123-4567',
+    hours: { mon: { open: '08:00', close: '18:00' }, tue: { open: '08:00', close: '18:00' }, wed: { open: '08:00', close: '18:00' }, thu: { open: '08:00', close: '18:00' }, fri: { open: '08:00', close: '18:00' }, sat: { open: '09:00', close: '17:00' }, sun: { closed: true } },
+    heroStyle: 'full', homeStyle: 'standard',
+    photos: { hero: photo('hero', 1600, 1067, '店內靠窗座位'), room: [photo('room-2', 1200, 1600, '濃縮咖啡'), photo('room-3', 1600, 1200, '手沖咖啡'), photo('room-6', 1600, 1200, '滴濾咖啡')] },
+    blocks: [{ id: 'fresh', title: '新鮮送達', body: '烘焙後一週內寄出，讓你在家也能喝到最新鮮的味道。', photo: photo('room-1', 1600, 1200, '新鮮烘焙的咖啡豆'), side: 'left' }],
+    shop: { enabled: true, note: '', items: [1, 2, 3, 4, 5, 6].map((i) => ({ id: 'blend0' + i, name: '綜合豆 0' + i, price: [850, 850, 300, 230, 750, 450][i - 1], desc: '半磅裝', photo: photo('item-' + i, 800, 800, '綜合豆 0' + i) })) },
+    order: ['about', 'interior', 'blocks', 'shop', 'visit']
+  };
+  const r = buildSite({ template: 'cafe', content, palette: 'caramel', sections: { menu: false, interior: true, faq: false, news: false }, layout: 'single', siteUrl, headingFont: true, imageVariants: true });
+  const font = await buildHeadingFont(r.files, 'serif');
+  rmSync(outDir, { recursive: true, force: true });
+  for (const [f, c] of Object.entries(r.files)) {
+    const dest = join(outDir, f); mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, f.endsWith('.html') ? c.replace(/<meta name="robots" content="[^"]*">/, '<meta name="robots" content="noindex, nofollow">').replace('</footer>', '<div class="wrap">' + DEMO_NOTE + '</div></footer>') : c);
+  }
+  mkdirSync(join(outDir, 'images'), { recursive: true });
+  // 圖片檔名依建置計畫（hero、room-1..3、blk-fresh、item-blend0N）；商品圖從示範照片裁成 800×800 的正方形（每張不同）
+  const srcOf = { hero: 'hero', 'room-1': 'room-2', 'room-2': 'room-3', 'room-3': 'room-6', 'blk-fresh': 'room-1' };
+  const itemSrc = ['room-4', 'room-5', 'room-1', 'room-2', 'room-3', 'room-6'];
+  for (const p of r.images) {
+    let buf;
+    const m = p.role.match(/^item-blend0(\d)$/);
+    if (m) {
+      const i = Number(m[1]) - 1;
+      buf = await sharp(readFileSync(join(IMG_DIR, itemSrc[i] + '.webp'))).resize(800, 800, { fit: 'cover', position: ['centre', 'north', 'south', 'east', 'west', 'entropy'][i] }).webp({ quality: 82 }).toBuffer();
+    } else buf = readFileSync(join(IMG_DIR, srcOf[p.role] + '.webp'));
+    writeFileSync(join(outDir, p.file), buf);
+    for (const v of p.variants) writeFileSync(join(outDir, v.file), await makeSmall(buf, v.w));
+  }
+  if (font) { mkdirSync(join(outDir, 'fonts'), { recursive: true }); writeFileSync(join(outDir, HEADING_FONT_FILE), font); }
+  writeFileSync(join(outDir, '_headers'), HEADERS_FILE + '/*\n  X-Robots-Tag: noindex, nofollow\n');
+  return r;
+}
 
 export async function buildDemo({ layout, homeStyle, siteUrl, outDir }) {
   const content = JSON.parse(JSON.stringify(sample.content));
@@ -65,6 +108,18 @@ export async function buildDemo({ layout, homeStyle, siteUrl, outDir }) {
 
 if (import.meta.url === 'file://' + process.argv[1]) {
   const cf = noDeploy ? null : makeCloudflare({ token: process.env.CLOUDFLARE_API_TOKEN, accountId: process.env.CLOUDFLARE_ACCOUNT_ID });
+  if (compareOnly) {
+    const project = cf ? await cf.ensureProject(COMPARE.project) : { name: COMPARE.project, subdomain: COMPARE.project + '.pages.dev' };
+    const siteUrl = 'https://' + project.subdomain + '/', out = 'dist-demo/' + COMPARE.project;
+    const r = await buildCompare({ siteUrl, outDir: out });
+    console.log('compare', siteUrl, Object.keys(r.files).length, 'files', r.images.length, 'images');
+    if (cf) {
+      const p = spawnSync('npx', ['wrangler', 'pages', 'deploy', out, '--project-name', project.name, '--branch', 'main', '--commit-dirty=true'], { stdio: 'inherit', env: process.env });
+      if (p.status !== 0) process.exit(1);
+      console.log('::notice::比較用示範站：' + siteUrl);
+    }
+    process.exit(0);
+  }
   for (const name of RETIRED) {
     const out = 'dist-demo/' + name;
     rmSync(out, { recursive: true, force: true }); mkdirSync(out, { recursive: true });
