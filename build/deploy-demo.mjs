@@ -35,6 +35,12 @@ export async function buildDemo({ layout, homeStyle, siteUrl, outDir }) {
   ];
   content.showMap = true;
   content.contactForm = true;
+  content.bookingForm = true;
+  content.posts = [
+    { id: '2026-10-08-new-beans', title: '秋天的新豆：衣索比亞淺焙', date: '2026-10-08', body: '這個秋天我們進了一支衣索比亞的水洗豆，淺焙之後有明顯的花香與柑橘的酸甜，很適合用手沖慢慢喝。\n\n第一次喝淺焙的朋友可以先試冰手沖，酸感會更柔和。豆子也有少量分裝販售，歡迎來店詢問。' },
+    { id: '2026-10-20-scone-day', title: '週末限定：現烤司康', date: '2026-10-20', body: '每週六、週日早上會烤一批原味與伯爵茶司康，通常下午就會賣完。\n\n想確定吃得到的話，可以先用網站的線上預約留下時間，我們會幫你保留。' }
+  ];
+  content.en = { enabled: true, name: 'Afternoon Sun Coffee', tagline: 'Pour-over coffee and home-baked desserts in Kaohsiung', intro: 'Afternoon Sun Coffee is a small independent café tucked in a quiet lane of Lingya District, Kaohsiung. We brew single-origin pour-over coffee and bake our own scones and cakes every week.\n\nThe window seats get warm afternoon light, and every seat has a power outlet. Walk-ins are welcome on weekdays; we recommend booking on weekend afternoons.', address: 'No. 100, Siwei 3rd Rd., Lingya Dist., Kaohsiung City 802, Taiwan' };
   const dims = (f) => (/room-(2|5)/.test(f) ? { w: 1200, h: 1600 } : f === 'hero' ? { w: 1600, h: 1067 } : { w: 1600, h: 1200 });
   const alt = (f) => (DEMO_PHOTOS.find((p) => p.file === f + '.webp') || {}).alt || '';
   content.photos.hero = { path: 'demo/hero.webp', ...dims('hero'), alt: alt('hero') };

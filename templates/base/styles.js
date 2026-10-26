@@ -111,11 +111,19 @@ iframe.embed.map{max-width:none;aspect-ratio:auto;height:360px}
 .contact-form{max-width:560px}
 .contact-form p{margin:0 0 14px}
 .contact-form label{display:block;font-weight:600;margin-bottom:4px}
-.contact-form input,.contact-form textarea{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.alt .contact-form input,.alt .contact-form textarea{background:var(--surface)}
+.form-row{display:grid;gap:0 14px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.contact-form select,.contact-form input,.contact-form textarea{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.alt .contact-form select,.alt .contact-form input,.alt .contact-form textarea{background:var(--surface)}
 .contact-form input:focus,.contact-form textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
 .contact-form button[disabled],.contact-form input[disabled],.contact-form textarea[disabled]{opacity:.6;cursor:not-allowed}
 .hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}
+.posts{list-style:none;margin:0;padding:0;display:grid;gap:18px}
+.posts li{border-bottom:1px solid var(--line);padding-bottom:18px}
+.posts a{text-decoration:none;color:var(--text)}.posts a:hover h3{color:var(--accent)}
+.posts h3{font-size:20px;margin:0 0 4px}
+.posts time{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+.posts p{margin:6px 0 0;color:var(--muted)}
+.post-body{max-width:42em}.post-body p{margin:0 0 18px;font-size:17px}
 footer{border-top:1px solid var(--line);padding:32px 0 44px;color:var(--muted);font-size:14px;background:var(--surface)}
 footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 24px}
 .foot-nav{display:flex;flex-wrap:wrap;gap:4px 16px}

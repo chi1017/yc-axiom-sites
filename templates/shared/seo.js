@@ -1,7 +1,7 @@
 import { esc, jsonForScript, len, clip } from './escape.js';
 import { hoursSummary, openingHoursSpec } from './hours.js';
 import { parseAddress } from './region.js';
-import { liveMenu, liveFaq, liveNews } from './content.js';
+import { liveMenu, liveFaq, liveNews, livePosts } from './content.js';
 
 const MIN_DESC = 80, MAX_DESC = 160;
 
@@ -55,6 +55,14 @@ export function buildDescription(content, tpl) {
 }
 
 // 多頁版子頁的標題：「頁名｜店名」；首頁沿用 buildTitle
+// 補足描述長度：一句話太短時接上首頁描述，最多 160 字
+export function fitDescription(lead, content, tpl) {
+  let out = lead;
+  if (len(out) < MIN_DESC) out += buildDescription(content, tpl);
+  if (len(out) > MAX_DESC) out = clip(out, MAX_DESC - 1) + '…';
+  return out;
+}
+
 export function pageTitle(content, tpl, page) {
   if (!page || page.key === 'home') return buildTitle(content, tpl);
   const name = content.name || '你的店名';
@@ -134,6 +142,8 @@ export function buildFaqLd(model) {
 }
 
 export function buildBreadcrumbLd(model) {
+  // crumbs：文章頁等多層頁面自己指定 [{name,url}]
+  if (model.crumbs) return { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: model.crumbs.map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.name, item: c.url })) };
   if (!model.pageUrl || !model.pageInfo || model.pageInfo.key === 'home') return null;
   return {
     '@context': 'https://schema.org',
@@ -145,7 +155,7 @@ export function buildBreadcrumbLd(model) {
   };
 }
 
-const FAVICON = (color) => 'data:image/svg+xml,' + encodeURIComponent(
+export const FAVICON = (color) => 'data:image/svg+xml,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="' + color + '"/><circle cx="32" cy="32" r="12" fill="none" stroke="#fff" stroke-width="4"/></svg>');
 
 // <head> 內容。preview 不輸出 canonical / OG / JSON-LD 以外的追蹤，但仍輸出 meta 讓預覽盡量接近成品。
@@ -155,7 +165,7 @@ export function buildHead(model) {
   const hero = model.heroFile ? absUrl(siteUrl, model.heroFile) : '';
   const url = model.pageUrl || siteUrl;
   // 店家資料每頁都放（同一個 @id），搜尋與 AI 從任何一頁進來都能對應到同一家店
-  const lds = [buildBusinessLd(model), buildFaqLd(model), buildBreadcrumbLd(model)].filter(Boolean);
+  const lds = [buildBusinessLd(model), buildFaqLd(model), buildBreadcrumbLd(model), ...(model.extraLd || [])].filter(Boolean);
   const h = [];
   h.push('<meta charset="utf-8">');
   h.push('<meta name="viewport" content="width=device-width, initial-scale=1">');
@@ -163,9 +173,10 @@ export function buildHead(model) {
   h.push('<meta name="description" content="' + esc(desc) + '">');
   h.push('<meta name="robots" content="index, follow, max-image-preview:large">');
   h.push('<link rel="canonical" href="' + esc(url) + '">');
+  if (model.alternates) model.alternates.forEach(([lang, href]) => h.push('<link rel="alternate" hreflang="' + esc(lang) + '" href="' + esc(href) + '">'));
   h.push('<meta name="theme-color" content="' + esc(colors.bg) + '">');
   h.push('<link rel="icon" href="' + FAVICON(colors.accent) + '">');
-  h.push('<meta property="og:type" content="website">');
+  h.push('<meta property="og:type" content="' + (model.post ? 'article' : 'website') + '">');
   h.push('<meta property="og:site_name" content="' + esc(c.name) + '">');
   h.push('<meta property="og:title" content="' + esc(title) + '">');
   h.push('<meta property="og:description" content="' + esc(desc) + '">');
@@ -215,6 +226,11 @@ export function llmsTxt(model) {
   if (model.pageLinks && model.pageLinks.length > 1) {
     L.push('', '## 網站頁面', '');
     model.pageLinks.forEach((p) => L.push('- [' + p.label + '](' + absUrl(siteUrl, p.path) + ')'));
+  }
+  const posts = livePosts(c);
+  if (posts.length) {
+    L.push('', '## 文章', '');
+    posts.forEach((p) => L.push('- [' + p.title + '](' + absUrl(siteUrl, 'posts/' + p.id + '/') + ')' + (p.date ? '（' + p.date + '）' : '')));
   }
   L.push('');
   return L.join('\n');

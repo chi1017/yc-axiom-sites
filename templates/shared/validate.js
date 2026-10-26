@@ -59,6 +59,11 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
   const rawGa = String((raw && raw.ga4) || '').trim();
   if (rawGa && !GA4_RE.test(rawGa.toUpperCase())) add('ga4', 'Google Analytics 評估 ID 格式是 G- 開頭（例如 G-AB12CD34EF）');
   content.reviews.forEach((r, i) => { if (r.name && !r.text) add('reviews.' + i, '客人評價第 ' + (i + 1) + ' 則缺少內容'); });
+  content.posts.forEach((p, i) => {
+    if ((p.title || p.body) && !(p.title && p.body)) add('posts.' + i, '文章第 ' + (i + 1) + ' 篇要同時有標題與內容');
+    if (p.title && !p.date) add('posts.' + i, '文章第 ' + (i + 1) + ' 篇缺少日期');
+  });
+  if (content.en.enabled && (!content.en.name || !content.en.intro)) add('en', '英文版要填英文店名與英文介紹（或先關閉英文版）');
   if (content.showMap && !content.address) add('address', '要顯示地圖，請先填店家地址');
   if (template !== undefined && !getIndustry(template)) add('template', '不支援的行業類型，請重新選擇');
   const se = slugError(slug, { allowBrand: !checkBrand });

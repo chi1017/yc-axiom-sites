@@ -7,7 +7,9 @@ export const LIMITS = {
   bookingLabel: 12, menu: 12, menuName: 40, price: 99999,
   faq: 8, faqQ: 60, faqA: 300, news: 6, newsTitle: 60,
   room: 6, alt: 60, social: 200,
-  reviews: 6, reviewName: 20, reviewText: 200
+  reviews: 6, reviewName: 20, reviewText: 200,
+  posts: 12, postTitle: 60, postBody: 3000,
+  enName: 60, enTagline: 100, enIntro: 1000, enAddress: 160
 };
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
@@ -37,7 +39,10 @@ export function emptyContent() {
     showMap: false,              // 來店資訊顯示 Google 地圖（依地址）
     video: '',                   // YouTube 影片網址
     reviews: [],                 // 客人評價 [{ name, text }]
-    ga4: ''                      // Google Analytics 4 評估 ID（G-XXXXXXX），選填
+    ga4: '',                     // Google Analytics 4 評估 ID（G-XXXXXXX），選填
+    posts: [],                   // 文章 [{ id, title, date, body }]：每篇一個網頁 posts/<id>/
+    bookingForm: false,          // 線上預約表單（客人送出預約申請，店家收到通知後再確認）
+    en: { enabled: false, name: '', tagline: '', intro: '', address: '' }   // 英文版頁面 /en/
   };
 }
 
@@ -48,6 +53,8 @@ export function youtubeId(url) {
   return m ? m[1] : '';
 }
 export const GA4_RE = /^G-[A-Z0-9]{4,15}$/;
+// 文章網址代碼（posts/<id>/）：建立時由編輯器產生，之後不變
+export const POST_ID_RE = /^[a-z0-9][a-z0-9-]{4,38}[a-z0-9]$/;
 export function defaultSections() { return { menu: true, interior: true, faq: true, news: true }; }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -129,12 +136,23 @@ export function normalizeContent(raw) {
     return { date: validDate(o.date) ? o.date : '', title: line(o.title, LIMITS.newsTitle) };
   });
   c.contactForm = r.contactForm === true;
+  c.bookingForm = r.bookingForm === true;
+  const en = r.en && typeof r.en === 'object' ? r.en : {};
+  c.en = { enabled: en.enabled === true, name: line(en.name, LIMITS.enName), tagline: line(en.tagline, LIMITS.enTagline), intro: str(en.intro, LIMITS.enIntro), address: line(en.address, LIMITS.enAddress) };
   c.showMap = r.showMap === true;
   const vid = youtubeId(r.video);
   c.video = vid ? 'https://www.youtube.com/watch?v=' + vid : '';
   c.reviews = arr(r.reviews).slice(0, LIMITS.reviews).map((x) => {
     const o = x && typeof x === 'object' ? x : {};
     return { name: line(o.name, LIMITS.reviewName), text: str(o.text, LIMITS.reviewText) };
+  });
+  const seen = new Set();
+  c.posts = arr(r.posts).slice(0, LIMITS.posts).map((x) => {
+    const o = x && typeof x === 'object' ? x : {};
+    let id = String(o.id || '').toLowerCase();
+    if (!POST_ID_RE.test(id) || seen.has(id)) id = '';
+    if (id) seen.add(id);
+    return { id, title: line(o.title, LIMITS.postTitle), date: validDate(o.date) ? o.date : '', body: str(o.body, LIMITS.postBody) };
   });
   const ga = String(r.ga4 || '').trim().toUpperCase();
   c.ga4 = GA4_RE.test(ga) ? ga : '';
@@ -154,3 +172,5 @@ export const liveMenu = (c) => c.menu.filter((m) => m.name);
 export const liveFaq = (c) => c.faq.filter((f) => f.q && f.a);
 export const liveNews = (c) => c.news.filter((n) => n.title);
 export const liveReviews = (c) => c.reviews.filter((r) => r.text);
+// 上線的文章：有代碼、標題、內容；依日期新到舊
+export const livePosts = (c) => c.posts.filter((p) => p.id && p.title && p.body).sort((a, b) => (b.date || '').localeCompare(a.date || ''));

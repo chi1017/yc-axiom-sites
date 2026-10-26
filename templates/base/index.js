@@ -1,6 +1,6 @@
-import { esc, paragraphs, safeHttpsUrl, telHref } from '../shared/escape.js';
-import { buildHead } from '../shared/seo.js';
-import { liveMenu, liveFaq, liveNews, liveReviews, youtubeId } from '../shared/content.js';
+import { esc, paragraphs, safeHttpsUrl, telHref, jsonForScript } from '../shared/escape.js';
+import { buildHead, buildBusinessLd, absUrl, FAVICON } from '../shared/seo.js';
+import { liveMenu, liveFaq, liveNews, liveReviews, livePosts, youtubeId } from '../shared/content.js';
 import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
 import { pagesFor } from '../shared/pages.js';
 import { baseCss } from './styles.js';
@@ -22,7 +22,7 @@ function ctx(m) {
     name: c.name ? esc(c.name) : ph(PH_NAME),
     tel: telHref(c.phone),
     bookUrl: safeHttpsUrl(c.booking.url),
-    menu: liveMenu(c), faq: liveFaq(c), news: liveNews(c), reviews: liveReviews(c),
+    menu: liveMenu(c), faq: liveFaq(c), news: liveNews(c), reviews: liveReviews(c), posts: livePosts(c),
     mapUrl: c.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) : '',
     plainAddr: region ? m.address.region + m.address.street : c.address,   // 內文敘述不帶郵遞區號
     on: (key) => m.pageList.some((p) => p.key === key)
@@ -51,6 +51,7 @@ function heroSec(x) {
     : (preview ? '<div class="ph-img">[主視覺照片]</div>' : '');
   const actions = [];
   if (x.bookUrl && c.booking.label) actions.push('<a class="btn" href="' + esc(x.bookUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(c.booking.label) + '</a>');
+  else if (c.bookingForm) actions.push('<a class="btn" href="' + esc(x.m.layout === 'multi' && x.on('visit') ? x.m.href('visit') + '#booking' : '#booking') + '">線上預約</a>');
   else if (preview) actions.push('<span class="btn ph">[訂位按鈕]</span>');
   if (x.tel) actions.push('<a class="btn ghost" href="' + esc(x.tel) + '">撥打電話</a>');
   const text = '<div class="hero-text"><p class="kicker">' + (x.region ? esc(x.region) + '｜' : '') + esc(x.t.kindLabel) + '</p>' +
@@ -204,6 +205,25 @@ function visitSec(x, mode) {
     mapBox(x) + '</div></section>';
 }
 
+// ── 文章 ── mode 'teaser'：首頁列最新 3 篇；'page'：文章列表頁列全部
+const ymd = (d) => (d ? d.replace(/-/g, '/') : '');
+const excerpt = (body, n) => { const t = String(body || '').replace(/\s+/g, ' ').trim(); return [...t].length > n ? [...t].slice(0, n).join('') + '…' : t; };
+function postsSec(x, mode) {
+  const list = mode === 'teaser' ? x.posts.slice(0, 3) : x.posts;
+  if (!list.length) return '';
+  return '<section id="posts"><div class="wrap">' + (mode === 'page' ? '' : '<h2>文章</h2>') + '<ul class="posts">' +
+    list.map((p) => '<li><a href="' + esc(x.m.postHref(p.id)) + '"><h3>' + esc(p.title) + '</h3></a>' + (p.date ? '<time datetime="' + esc(p.date) + '">' + esc(ymd(p.date)) + '</time>' : '') +
+      '<p>' + esc(excerpt(p.body, 80)) + '</p></li>').join('') + '</ul>' +
+    (mode === 'teaser' && x.posts.length > 3 ? '<p class="more"><a href="' + esc(x.m.postsHref) + '">看所有文章</a></p>' : '') + '</div></section>';
+}
+function postMain(x, post) {
+  const paras = paragraphs(post.body);
+  return ['<section class="page-head" id="top"><div class="wrap"><p class="kicker">' + x.name + (post.date ? '・<time datetime="' + esc(post.date) + '">' + esc(ymd(post.date)) + '</time>' : '') + '</p><h1>' + esc(post.title) + '</h1></div></section>',
+    '<section id="article"><div class="wrap"><article class="post-body">' + paras.map((t) => '<p>' + esc(t) + '</p>').join('') + '</article>' +
+      '<p class="more"><a href="' + esc(x.m.postsHref) + '">所有文章</a></p></div></section>',
+    contactStrip(x)];
+}
+
 // ── 客人評價（只顯示，不加 Review 結構化資料：店家自己放的評價不符合搜尋引擎的評價標記規範）──
 function reviewsSec(x) {
   if (!x.reviews.length) return '';
@@ -249,6 +269,35 @@ function contactSec(x, mode) {
     '<p class="note">你填寫的資料只會寄給' + x.name + '，用來回覆你的留言。</p></form></div></section>';
 }
 
+// ── 線上預約：送出「預約申請」，店家收到通知後再與客人確認（網站不保留時段）──
+const PEOPLE_OFFERS = ['menu', 'room'];
+function bookingSec(x) {
+  const { c, m, t } = x;
+  if (!c.bookingForm) return '';
+  const live = !x.preview && m.siteId && m.bookingAction;
+  const dis = live ? '' : ' disabled';
+  const note = x.preview ? '<p class="note">（預覽：正式網站上可以送出）</p>' : (!live ? '<p class="note">（示範網站：此表單不會送出）</p>' : '');
+  const people = PEOPLE_OFFERS.includes(t.offer.path === 'rooms/' ? 'room' : t.offer.path === 'menu/' ? 'menu' : '');
+  const items = x.menu.map((i) => i.name);
+  const itemField = !people && items.length
+    ? '<p><label for="bk-item">想預約的' + esc(t.offer.item) + '</label><select id="bk-item" name="item"' + dis + '><option value="">（請選擇，可不選）</option>' + items.map((n) => '<option>' + esc(n) + '</option>').join('') + '</select></p>'
+    : '';
+  const hs = hasAnyHours(c.hours) ? '<p class="note">營業時間：' + esc(hoursSummary(c.hours)) + '</p>' : '';
+  return '<section id="booking"><div class="wrap"><h2>線上預約</h2><p>填寫想預約的日期與時間，送出後我們會盡快與你聯絡確認，確認後才算預約成功。</p>' + hs + note +
+    '<form class="contact-form" method="post" action="' + esc(live ? m.bookingAction : '#') + '">' +
+    (live ? '<input type="hidden" name="site" value="' + esc(m.siteId) + '">' : '') +
+    '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
+    '<div class="form-row"><p><label for="bk-date">日期</label><input id="bk-date" name="date" type="date" required' + dis + '></p>' +
+    '<p><label for="bk-time">時間</label><input id="bk-time" name="time" type="time" step="900" required' + dis + '></p>' +
+    (people ? '<p><label for="bk-people">人數</label><input id="bk-people" name="people" type="number" min="1" max="50" value="2" required' + dis + '></p>' : '') + '</div>' +
+    itemField +
+    '<p><label for="bk-name">姓名</label><input id="bk-name" name="name" type="text" maxlength="60" required autocomplete="name"' + dis + '></p>' +
+    '<p><label for="bk-contact">電話或 Email</label><input id="bk-contact" name="contact" type="text" maxlength="120" required autocomplete="tel"' + dis + '></p>' +
+    '<p><label for="bk-note">備註（選填）</label><textarea id="bk-note" name="message" rows="3" maxlength="500"' + dis + '></textarea></p>' +
+    '<p><button class="btn" type="submit"' + dis + '>送出預約申請</button></p>' +
+    '<p class="note">你填寫的資料只會寄給' + x.name + '，用來確認預約。</p></form></div></section>';
+}
+
 // ── 雜誌式首頁 ──
 // 滿版圖文對半的大區塊（side：圖片在左 'left' 或右 'right'）
 function splitBlock(x, id, title, body, photo, role, side) {
@@ -292,10 +341,11 @@ function magazineMain(x, multi) {
   if (s.interior) blocks.push(photoStrip(x, rooms.slice(3), 4));
   if (multi) {
     if (x.on('news') && s.news) blocks.push(newsSec(x, 'teaser'));
-    if (!x.on('visit')) blocks.push(visitSec(x, 'section'), contactSec(x, 'section'));
+    blocks.push(postsSec(x, 'teaser'));
+    if (!x.on('visit')) blocks.push(bookingSec(x), visitSec(x, 'section'), contactSec(x, 'section'));
   } else {
     if (s.news) blocks.push(newsSec(x, 'section'));
-    blocks.push(visitSec(x, 'section'), contactSec(x, 'section'));
+    blocks.push(postsSec(x, 'teaser'), bookingSec(x), visitSec(x, 'section'), contactSec(x, 'section'));
   }
   return blocks;
 }
@@ -304,7 +354,7 @@ function magazineMain(x, multi) {
 function singleMain(x) {
   const s = x.m.show;
   return [heroSec(x), aboutSec(x, 'section'), videoSec(x), s.menu ? menuSec(x, 'section') : '', s.interior ? interiorSec(x, 'section') : '',
-    reviewsSec(x), s.news ? newsSec(x, 'section') : '', s.faq ? faqSec(x, 'section') : '', visitSec(x, 'section'), contactSec(x, 'section')];
+    reviewsSec(x), s.news ? newsSec(x, 'section') : '', postsSec(x, 'teaser'), s.faq ? faqSec(x, 'section') : '', bookingSec(x), visitSec(x, 'section'), contactSec(x, 'section')];
 }
 
 // 多頁版首頁：主視覺 + 各頁摘要（頁面有開才放）；來店資訊頁沒開時把完整資訊放首頁
@@ -315,9 +365,10 @@ function multiHomeMain(x) {
     x.on('interior') && s.interior ? interiorSec(x, 'teaser') : '',
     reviewsSec(x),
     x.on('news') && s.news ? newsSec(x, 'teaser') : '',
+    postsSec(x, 'teaser'),
     x.on('faq') && s.faq ? faqSec(x, 'teaser') : '',
     x.on('visit') ? visitSec(x, 'teaser') : visitSec(x, 'section'),
-    x.on('visit') ? '' : contactSec(x, 'section')];
+    x.on('visit') ? '' : bookingSec(x), x.on('visit') ? '' : contactSec(x, 'section')];
 }
 
 function multiPageMain(x, key) {
@@ -326,7 +377,7 @@ function multiPageMain(x, key) {
     news: () => newsSec(x, 'page'), faq: () => faqSec(x, 'page'), visit: () => visitSec(x, 'page') }[key];
   // 其他頁面也放幾題常見問題（只顯示，不重複標記 FAQPage；完整標記在常見問題頁）
   const faqTeaser = key !== 'faq' && x.on('faq') && x.m.show.faq && x.faq.length ? faqSec(x, 'teaser') : '';
-  const extra = key === 'about' ? [videoSec(x), reviewsSec(x)] : key === 'visit' ? [contactSec(x, 'page')] : [];
+  const extra = key === 'about' ? [videoSec(x), reviewsSec(x)] : key === 'visit' ? [bookingSec(x), contactSec(x, 'page')] : [];
   return [pageHead(x, title, key), body(), ...extra, faqTeaser, key === 'visit' ? '' : contactStrip(x)];
 }
 
@@ -372,18 +423,25 @@ function render(m) {
   const multi = m.layout === 'multi';
   // 一頁版導覽用短名稱（錨點）；多頁版用頁名（連結）
   const short = { about: '關於我們', menu: x.t.offer.nav, interior: x.t.space.label, news: '最新消息', faq: '常見問題', visit: x.t.visit.label };
+  // 一頁版的錨點在子頁（文章頁）要加回首頁的路徑
+  const anchor = m.anchorBase || '';
   const navItems = multi
     ? m.pageList.filter((p) => p.key !== 'home').map((p) => [p.key, esc(p.label), m.href(p.key)])
     : [['about', true], ['menu', m.show.menu], ['interior', m.show.interior], ['news', m.show.news], ['faq', m.show.faq], ['visit', true]]
-      .filter((i) => i[1]).map((i) => [i[0], esc(short[i[0]]), '#' + i[0]]);
-  const nav = navItems.map((i) => '<a href="' + esc(i[2]) + '"' + (multi && i[0] === m.page ? ' aria-current="page"' : '') + '>' + i[1] + '</a>').join('');
+      .filter((i) => i[1]).map((i) => [i[0], esc(short[i[0]]), anchor + '#' + i[0]]);
+  if (x.posts.length && m.postsHref) navItems.push(['posts', '文章', m.postsHref]);
+  const cur = m.post ? 'posts' : m.page;
+  const nav = navItems.map((i) => '<a href="' + esc(i[2]) + '"' + ((multi || i[0] === 'posts') && i[0] === cur ? ' aria-current="page"' : '') + '>' + i[1] + '</a>').join('');
   const magazine = c.homeStyle === 'magazine';
-  const main = multi ? (m.page === 'home' ? (magazine ? magazineMain(x, true) : multiHomeMain(x)) : multiPageMain(x, m.page)) : (magazine ? magazineMain(x, false) : singleMain(x));
+  const main = m.post ? postMain(x, m.post)
+    : m.page === 'posts' ? [pageHead(x, '文章', 'posts'), postsSec(x, 'page'), contactStrip(x)]
+    : multi ? (m.page === 'home' ? (magazine ? magazineMain(x, true) : multiHomeMain(x)) : multiPageMain(x, m.page)) : (magazine ? magazineMain(x, false) : singleMain(x));
   const footNav = multi ? '<nav class="foot-nav" aria-label="頁尾選單"><a href="' + esc(m.href('home')) + '">首頁</a>' + navItems.map((i) => '<a href="' + esc(i[2]) + '">' + i[1] + '</a>').join('') + '</nav>' : '';
-  const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + '</span>' + footNav + '</div></footer>';
+  const enLink = c.en.enabled && c.en.name && c.en.intro && m.enHref ? '<a class="lang-link" href="' + esc(m.enHref) + '" hreflang="en" lang="en">English</a>' : '';
+  const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + (enLink ? '　' + enLink : '') + '</span>' + footNav + '</div></footer>';
   return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
     '<a class="skip" href="#main">跳到主要內容</a>\n' +
-    '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : '#top') + '">' + x.name + '</a>' +
+    '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : (anchor || '#top')) + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
     '<nav id="site-nav" aria-label="頁面選單">' + nav + '</nav></div></header>\n' +
     '<main id="main">\n' + finish(main) + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + trackers(m) + '</body>\n</html>\n';
@@ -405,6 +463,50 @@ function renderNotFound(m) {
     '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
 }
 
+// ── 英文版頁面 /en/（一頁，給外國客人；與中文首頁用 hreflang 互相對應）──
+const EN_OFFER = { 'menu/': 'Menu & Prices', 'services/': 'Services & Prices', 'courses/': 'Classes & Fees', 'products/': 'Products & Prices', 'treatments/': 'Treatments', 'rooms/': 'Rooms & Rates' };
+const EN_DAY = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+function enHours(hours) {
+  return groupHours(hours).map((g) => {
+    const a = EN_DAY[g.days[0]], b = EN_DAY[g.days[g.days.length - 1]];
+    return { label: g.days.length === 1 ? a : g.days.length === 2 ? a + ', ' + b : a + '–' + b, text: g.state.kind === 'open' ? g.state.open + '–' + g.state.close : 'Closed' };
+  });
+}
+function renderEn(m) {
+  const x = ctx(m);
+  const { c } = x, e = c.en;
+  const name = esc(e.name), title = e.name + (e.tagline ? ' | ' + e.tagline : '');
+  const flat = e.intro.replace(/\s+/g, ' ');
+  const desc = [...flat].length > 155 ? [...flat].slice(0, 154).join('') + '…' : flat;
+  const url = absUrl(m.siteUrl, 'en/'), zh = m.siteUrl;
+  const addr = e.address || c.address;
+  const ld = { ...buildBusinessLd(m), name: e.name, alternateName: c.name || undefined, url, description: desc, inLanguage: 'en' };
+  if (ld.address) ld.address = { '@type': 'PostalAddress', streetAddress: addr, addressCountry: 'TW' };
+  const hero = c.photos.hero;
+  const hrs = enHours(c.hours);
+  const offer = EN_OFFER[x.t.offer.path] || 'Prices';
+  const sections = [
+    '<section class="hero" id="top"><div class="wrap hero-grid"><div><h1>' + name + '</h1>' + (e.tagline ? '<p class="lead">' + esc(e.tagline) + '</p>' : '') +
+      '<div class="actions">' + (x.bookUrl ? '<a class="btn" href="' + esc(x.bookUrl) + '" target="_blank" rel="noopener noreferrer">Book online</a>' : '') + (x.tel ? '<a class="btn ghost" href="' + esc(x.tel) + '">Call us</a>' : '') + '</div></div>' +
+      (hero ? '<figure>' + img(x, 'hero', hero, e.name, 'high') + '</figure>' : '') + '</div></section>',
+    '<section id="about"><div class="wrap"><h2>About us</h2>' + paragraphs(e.intro).map((p) => '<p>' + esc(p) + '</p>').join('') + '</div></section>',
+    x.menu.length && m.show.menu ? '<section id="menu"><div class="wrap"><h2>' + esc(offer) + '</h2><table class="price-table"><tbody>' +
+      x.menu.map((i) => '<tr><th scope="row">' + esc(i.name) + '</th><td>' + (i.price != null ? 'NT$ ' + i.price : '') + '</td></tr>').join('') + '</tbody></table><p class="note">Prices in New Taiwan dollars. Item names are shown in Chinese.</p></div></section>' : '',
+    '<section id="visit"><div class="wrap"><h2>Visit us</h2><dl class="info">' + (addr ? '<dt>Address</dt><dd>' + esc(addr) + (x.mapUrl ? ' (<a href="' + esc(x.mapUrl) + '" target="_blank" rel="noopener noreferrer">Google Maps</a>)' : '') + '</dd>' : '') +
+      (c.phone ? '<dt>Phone</dt><dd>' + (x.tel ? '<a href="' + esc(x.tel) + '">' + esc(c.phone) + '</a>' : esc(c.phone)) + '</dd>' : '') +
+      (hrs.length ? '<dt>Opening hours</dt><dd><ul class="hours-list">' + hrs.map((h) => '<li>' + esc(h.label) + ' ' + esc(h.text) + '</li>').join('') + '</ul></dd>' : '') + '</dl></div></section>'
+  ];
+  const head = ['<meta charset="utf-8">', '<meta name="viewport" content="width=device-width, initial-scale=1">', '<title>' + esc(title) + '</title>',
+    '<meta name="description" content="' + esc(desc) + '">', '<meta name="robots" content="index, follow, max-image-preview:large">', '<link rel="canonical" href="' + esc(url) + '">',
+    '<link rel="alternate" hreflang="zh-Hant" href="' + esc(zh) + '">', '<link rel="alternate" hreflang="en" href="' + esc(url) + '">', '<link rel="alternate" hreflang="x-default" href="' + esc(zh) + '">',
+    '<link rel="icon" href="' + FAVICON(m.colors.accent) + '">', '<meta property="og:type" content="website">', '<meta name="twitter:card" content="' + (m.heroFile ? 'summary_large_image' : 'summary') + '">', '<meta property="og:title" content="' + esc(title) + '">', '<meta property="og:description" content="' + esc(desc) + '">', '<meta property="og:url" content="' + esc(url) + '">', '<meta property="og:locale" content="en_US">',
+    (m.heroFile ? '<meta property="og:image" content="' + esc(absUrl(m.siteUrl, m.heroFile)) + '">' : ''), '<script type="application/ld+json">' + jsonForScript(ld) + '</script>'].filter(Boolean).join('\n');
+  return '<!doctype html>\n<html lang="en">\n<head>\n' + head + '\n<style>' + baseCss(m.colors, { headingFont: false }) + '</style>\n</head>\n<body>\n' +
+    '<header class="top"><div class="wrap"><a class="brand" href="./">' + name + '</a><nav aria-label="Menu"><a href="#about">About</a>' + (x.menu.length && m.show.menu ? '<a href="#menu">' + esc(offer.split(' &')[0]) + '</a>' : '') + '<a href="#visit">Visit</a><a href="../" hreflang="zh-Hant" lang="zh-Hant">中文</a></nav></div></header>\n' +
+    '<main id="main">\n' + sections.filter(Boolean).join('\n') + '\n</main>\n' +
+    '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span><nav class="foot-nav"><a href="../" lang="zh-Hant">中文網站</a></nav></div></footer>\n' + trackers(m) + '</body>\n</html>\n';
+}
+
 // 聯絡表單送出後的感謝頁（noindex、不列入 sitemap）
 function renderThanks(m) {
   const c = m.content;
@@ -413,8 +515,8 @@ function renderThanks(m) {
     '<title>已收到你的留言' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
     '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
-    '<main id="main"><section class="page-head"><div class="wrap"><h1>謝謝你的留言</h1>' +
-    '<p class="lead">我們已經收到，會盡快用你留下的聯絡方式回覆你。</p><p class="more"><a href="/">回首頁</a></p></div></section></main>\n' +
+    '<main id="main"><section class="page-head"><div class="wrap"><h1>已經收到了，謝謝</h1>' +
+    '<p class="lead">我們會盡快用你留下的聯絡方式回覆你。如果是預約申請，要等我們確認後才算預約成功。</p><p class="more"><a href="/">回首頁</a></p></div></section></main>\n' +
     '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
 }
 
@@ -422,6 +524,6 @@ function renderThanks(m) {
 export function makeTemplate(industry) {
   return {
     id: industry.key, label: industry.label, kindLabel: industry.kindLabel, schemaType: industry.schemaType,
-    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound, renderThanks
+    offer: industry.offer, space: industry.space, visit: industry.visit, render, renderNotFound, renderThanks, renderEn
   };
 }

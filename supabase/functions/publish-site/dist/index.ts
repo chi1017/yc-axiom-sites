@@ -66,7 +66,14 @@ var LIMITS = {
   social: 200,
   reviews: 6,
   reviewName: 20,
-  reviewText: 200
+  reviewText: 200,
+  posts: 12,
+  postTitle: 60,
+  postBody: 3e3,
+  enName: 60,
+  enTagline: 100,
+  enIntro: 1e3,
+  enAddress: 160
 };
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
@@ -106,8 +113,14 @@ function emptyContent() {
     // YouTube 影片網址
     reviews: [],
     // 客人評價 [{ name, text }]
-    ga4: ""
+    ga4: "",
     // Google Analytics 4 評估 ID（G-XXXXXXX），選填
+    posts: [],
+    // 文章 [{ id, title, date, body }]：每篇一個網頁 posts/<id>/
+    bookingForm: false,
+    // 線上預約表單（客人送出預約申請，店家收到通知後再確認）
+    en: { enabled: false, name: "", tagline: "", intro: "", address: "" }
+    // 英文版頁面 /en/
   };
 }
 function youtubeId(url) {
@@ -116,6 +129,7 @@ function youtubeId(url) {
   return m ? m[1] : "";
 }
 var GA4_RE = /^G-[A-Z0-9]{4,15}$/;
+var POST_ID_RE = /^[a-z0-9][a-z0-9-]{4,38}[a-z0-9]$/;
 function defaultSections() {
   return { menu: true, interior: true, faq: true, news: true };
 }
@@ -198,12 +212,23 @@ function normalizeContent(raw) {
     return { date: validDate(o.date) ? o.date : "", title: line(o.title, LIMITS.newsTitle) };
   });
   c.contactForm = r.contactForm === true;
+  c.bookingForm = r.bookingForm === true;
+  const en = r.en && typeof r.en === "object" ? r.en : {};
+  c.en = { enabled: en.enabled === true, name: line(en.name, LIMITS.enName), tagline: line(en.tagline, LIMITS.enTagline), intro: str(en.intro, LIMITS.enIntro), address: line(en.address, LIMITS.enAddress) };
   c.showMap = r.showMap === true;
   const vid = youtubeId(r.video);
   c.video = vid ? "https://www.youtube.com/watch?v=" + vid : "";
   c.reviews = arr(r.reviews).slice(0, LIMITS.reviews).map((x) => {
     const o = x && typeof x === "object" ? x : {};
     return { name: line(o.name, LIMITS.reviewName), text: str(o.text, LIMITS.reviewText) };
+  });
+  const seen = /* @__PURE__ */ new Set();
+  c.posts = arr(r.posts).slice(0, LIMITS.posts).map((x) => {
+    const o = x && typeof x === "object" ? x : {};
+    let id = String(o.id || "").toLowerCase();
+    if (!POST_ID_RE.test(id) || seen.has(id)) id = "";
+    if (id) seen.add(id);
+    return { id, title: line(o.title, LIMITS.postTitle), date: validDate(o.date) ? o.date : "", body: str(o.body, LIMITS.postBody) };
   });
   const ga = String(r.ga4 || "").trim().toUpperCase();
   c.ga4 = GA4_RE.test(ga) ? ga : "";
@@ -440,6 +465,11 @@ function validateForPublish(content, sections, slug, raw, { checkBrand = false, 
   content.reviews.forEach((r, i) => {
     if (r.name && !r.text) add("reviews." + i, "客人評價第 " + (i + 1) + " 則缺少內容");
   });
+  content.posts.forEach((p, i) => {
+    if ((p.title || p.body) && !(p.title && p.body)) add("posts." + i, "文章第 " + (i + 1) + " 篇要同時有標題與內容");
+    if (p.title && !p.date) add("posts." + i, "文章第 " + (i + 1) + " 篇缺少日期");
+  });
+  if (content.en.enabled && (!content.en.name || !content.en.intro)) add("en", "英文版要填英文店名與英文介紹（或先關閉英文版）");
   if (content.showMap && !content.address) add("address", "要顯示地圖，請先填店家地址");
   if (template !== void 0 && !getIndustry(template)) add("template", "不支援的行業類型，請重新選擇");
   const se = slugError(slug, { allowBrand: !checkBrand });
