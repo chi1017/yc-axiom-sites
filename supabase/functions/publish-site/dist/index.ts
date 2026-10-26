@@ -33,7 +33,11 @@ var PALETTES = {
   clay: { label: "陶土紅", bg: "#F8F3F2", surface: "#EDE1DE", text: "#2E1A15", muted: "#664E47", accent: "#AA5137", onAccent: "#FFFFFF", line: "#DCCBC6" },
   sand: { label: "沙丘黃", bg: "#F8F6F2", surface: "#EDE8DE", text: "#2E2515", muted: "#665C47", accent: "#916511", onAccent: "#FFFFFF", line: "#DCD5C6" },
   graphite: { label: "石墨灰", bg: "#151719", surface: "#202427", text: "#EBEDEF", muted: "#ABB2BA", accent: "#9AA3AD", onAccent: "#151719", line: "#353A41" },
-  midnight: { label: "夜海藍", bg: "#13171B", surface: "#1E2429", text: "#E9EDF1", muted: "#A8B3BD", accent: "#6FA8DC", onAccent: "#13171B", line: "#323B43" }
+  midnight: { label: "夜海藍", bg: "#13171B", surface: "#1E2429", text: "#E9EDF1", muted: "#A8B3BD", accent: "#6FA8DC", onAccent: "#13171B", line: "#323B43" },
+  matcha: { label: "抹茶綠", bg: "#F6F7EF", surface: "#E6EAD5", text: "#1F2614", muted: "#4D5640", accent: "#4A6B22", onAccent: "#FFFFFF", line: "#D2D8BD" },
+  lake: { label: "湖水青", bg: "#0E1A1C", surface: "#152528", text: "#E6F1F0", muted: "#A9C0BE", accent: "#5CC8B8", onAccent: "#0E1A1C", line: "#26393C" },
+  paper: { label: "宣紙朱", bg: "#FAF7F0", surface: "#EFE7D6", text: "#2A241C", muted: "#5C5244", accent: "#9E2B25", onAccent: "#FFFFFF", line: "#DED3BE" },
+  navy: { label: "藏青金", bg: "#F7F6F1", surface: "#E8E5DB", text: "#18202F", muted: "#4A5162", accent: "#1F3B6B", onAccent: "#FFFFFF", line: "#D6D1C3" }
 };
 var PALETTE_IDS = Object.keys(PALETTES);
 var CUSTOM_RE = /^c-([0-9a-f]{6})-([ld])$/;
@@ -85,12 +89,20 @@ var LIMITS = {
   blockBody: 1500,
   btnLabel: 16,
   seoTitle: 60,
-  seoDesc: 160
+  seoDesc: 160,
+  sub: 60
 };
 var ORDER_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "blocks", "booking", "visit", "contact"];
 var BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
 var FONTS = ["serif", "sans", "round", "kai"];
 var BUTTONS = ["pill", "round", "square"];
+var TEXTURES = ["none", "paper", "dots", "grid", "glow", "contour"];
+var HEAD_STYLES = ["plain", "num", "bar", "chip"];
+var MOTIONS = ["rise", "fade", "zoom", "none"];
+var MENU_STYLES = ["list", "cards"];
+var GALLERY_STYLES = ["masonry", "grid", "slide"];
+var REVIEW_STYLES = ["cards", "quote"];
+var SUB_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "booking", "visit", "contact"];
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
 var HERO_STYLES = ["card", "full"];
@@ -146,8 +158,9 @@ function emptyContent() {
     // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
     blocks: [],
     // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: "serif", button: "pill", floatLine: false },
-    // 標題字型、按鈕形狀、LINE 浮動按鈕
+    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards" },
+    subs: {},
+    // 各區塊標題下方的一句副標題（選填）
     seo: { title: "", description: "", share: null }
     // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
@@ -301,7 +314,24 @@ function normalizeContent(raw) {
   }).filter((b2) => b2.id);
   c.order = normalizeOrder(r.order, c.blocks);
   const st = r.style && typeof r.style === "object" ? r.style : {};
-  c.style = { font: FONTS.includes(st.font) ? st.font : "serif", button: BUTTONS.includes(st.button) ? st.button : "pill", floatLine: st.floatLine === true };
+  const pick = (list, v) => list.includes(v) ? v : list[0];
+  c.style = {
+    font: FONTS.includes(st.font) ? st.font : "serif",
+    button: BUTTONS.includes(st.button) ? st.button : "pill",
+    floatLine: st.floatLine === true,
+    texture: pick(TEXTURES, st.texture),
+    motion: pick(MOTIONS, st.motion),
+    head: pick(HEAD_STYLES, st.head),
+    menuStyle: pick(MENU_STYLES, st.menuStyle),
+    gallery: pick(GALLERY_STYLES, st.gallery),
+    reviewStyle: pick(REVIEW_STYLES, st.reviewStyle)
+  };
+  const sb = r.subs && typeof r.subs === "object" ? r.subs : {};
+  c.subs = {};
+  SUB_KEYS.forEach((k) => {
+    const v = line(sb[k], LIMITS.sub);
+    if (v) c.subs[k] = v;
+  });
   const so = r.seo && typeof r.seo === "object" ? r.seo : {};
   c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
   return c;

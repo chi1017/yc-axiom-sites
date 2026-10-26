@@ -11,7 +11,7 @@ export const LIMITS = {
   posts: 12, postTitle: 60, postBody: 3000,
   enName: 60, enTagline: 100, enIntro: 1000, enAddress: 160,
   shopItems: 24, shopName: 40, shopDesc: 200, shopPrice: 200000, shopNote: 300, deposit: 100000,
-  blocks: 6, blockTitle: 40, blockBody: 1500, btnLabel: 16, seoTitle: 60, seoDesc: 160
+  blocks: 6, blockTitle: 40, blockBody: 1500, btnLabel: 16, seoTitle: 60, seoDesc: 160, sub: 60
 };
 // 首頁區塊（可調整順序）。主視覺固定在最上面；自訂區塊的 key 是 'b:<代碼>'
 export const ORDER_KEYS = ['about', 'video', 'menu', 'interior', 'shop', 'reviews', 'news', 'posts', 'faq', 'blocks', 'booking', 'visit', 'contact'];
@@ -22,6 +22,19 @@ export const FONTS = ['serif', 'sans', 'round', 'kai'];
 export const FONT_LABELS = { serif: '明體（典雅）', sans: '黑體（俐落）', round: '圓體（親切）', kai: '楷體（手寫感）' };
 export const BUTTONS = ['pill', 'round', 'square'];
 export const BUTTON_LABELS = { pill: '膠囊', round: '圓角', square: '方角' };
+// 外觀細節：背景紋理、捲動動畫、區塊排版（全部用 CSS 做，不增加網站載入的程式）
+export const TEXTURES = ['none', 'paper', 'dots', 'grid', 'glow', 'contour'];
+export const TEXTURE_LABELS = { none: '無', paper: '紙張顆粒', dots: '細點', grid: '方格紙', glow: '柔光暈染', contour: '等高線' };
+// 區塊標題樣式：plain＝只有標題、num＝編號（01、02…，像雜誌目錄）、bar＝左側色塊、chip＝標題上方的小標籤
+export const HEAD_STYLES = ['plain', 'num', 'bar', 'chip'];
+export const HEAD_LABELS = { plain: '簡潔', num: '編號', bar: '左側色塊', chip: '上方小標籤' };
+export const MOTIONS = ['rise', 'fade', 'zoom', 'none'];
+export const MOTION_LABELS = { rise: '向上浮現', fade: '淡入', zoom: '輕微放大', none: '不要動畫' };
+export const MENU_STYLES = ['list', 'cards'];
+export const GALLERY_STYLES = ['masonry', 'grid', 'slide'];
+export const REVIEW_STYLES = ['cards', 'quote'];
+// 可以加副標題的區塊
+export const SUB_KEYS = ['about', 'video', 'menu', 'interior', 'shop', 'reviews', 'news', 'posts', 'faq', 'booking', 'visit', 'contact'];
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
 export const HERO_STYLES = ['card', 'full'];
@@ -59,7 +72,8 @@ export function emptyContent() {
     bookingDeposit: 0,           // 線上預約要先付的訂金（0＝不收）
     order: [],                   // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
     blocks: [],                  // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: 'serif', button: 'pill', floatLine: false },   // 標題字型、按鈕形狀、LINE 浮動按鈕
+    style: { font: 'serif', button: 'pill', floatLine: false, texture: 'none', motion: 'rise', head: 'plain', menuStyle: 'list', gallery: 'masonry', reviewStyle: 'cards' },
+    subs: {},                    // 各區塊標題下方的一句副標題（選填）
     seo: { title: '', description: '', share: null }              // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
 }
@@ -207,7 +221,13 @@ export function normalizeContent(raw) {
   }).filter((b) => b.id);
   c.order = normalizeOrder(r.order, c.blocks);
   const st = r.style && typeof r.style === 'object' ? r.style : {};
-  c.style = { font: FONTS.includes(st.font) ? st.font : 'serif', button: BUTTONS.includes(st.button) ? st.button : 'pill', floatLine: st.floatLine === true };
+  const pick = (list, v) => (list.includes(v) ? v : list[0]);
+  c.style = { font: FONTS.includes(st.font) ? st.font : 'serif', button: BUTTONS.includes(st.button) ? st.button : 'pill', floatLine: st.floatLine === true,
+    texture: pick(TEXTURES, st.texture), motion: pick(MOTIONS, st.motion), head: pick(HEAD_STYLES, st.head),
+    menuStyle: pick(MENU_STYLES, st.menuStyle), gallery: pick(GALLERY_STYLES, st.gallery), reviewStyle: pick(REVIEW_STYLES, st.reviewStyle) };
+  const sb = r.subs && typeof r.subs === 'object' ? r.subs : {};
+  c.subs = {};
+  SUB_KEYS.forEach((k) => { const v = line(sb[k], LIMITS.sub); if (v) c.subs[k] = v; });
   const so = r.seo && typeof r.seo === 'object' ? r.seo : {};
   c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
   return c;

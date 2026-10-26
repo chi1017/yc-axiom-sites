@@ -141,7 +141,11 @@ var PALETTES = {
   clay: { label: "陶土紅", bg: "#F8F3F2", surface: "#EDE1DE", text: "#2E1A15", muted: "#664E47", accent: "#AA5137", onAccent: "#FFFFFF", line: "#DCCBC6" },
   sand: { label: "沙丘黃", bg: "#F8F6F2", surface: "#EDE8DE", text: "#2E2515", muted: "#665C47", accent: "#916511", onAccent: "#FFFFFF", line: "#DCD5C6" },
   graphite: { label: "石墨灰", bg: "#151719", surface: "#202427", text: "#EBEDEF", muted: "#ABB2BA", accent: "#9AA3AD", onAccent: "#151719", line: "#353A41" },
-  midnight: { label: "夜海藍", bg: "#13171B", surface: "#1E2429", text: "#E9EDF1", muted: "#A8B3BD", accent: "#6FA8DC", onAccent: "#13171B", line: "#323B43" }
+  midnight: { label: "夜海藍", bg: "#13171B", surface: "#1E2429", text: "#E9EDF1", muted: "#A8B3BD", accent: "#6FA8DC", onAccent: "#13171B", line: "#323B43" },
+  matcha: { label: "抹茶綠", bg: "#F6F7EF", surface: "#E6EAD5", text: "#1F2614", muted: "#4D5640", accent: "#4A6B22", onAccent: "#FFFFFF", line: "#D2D8BD" },
+  lake: { label: "湖水青", bg: "#0E1A1C", surface: "#152528", text: "#E6F1F0", muted: "#A9C0BE", accent: "#5CC8B8", onAccent: "#0E1A1C", line: "#26393C" },
+  paper: { label: "宣紙朱", bg: "#FAF7F0", surface: "#EFE7D6", text: "#2A241C", muted: "#5C5244", accent: "#9E2B25", onAccent: "#FFFFFF", line: "#DED3BE" },
+  navy: { label: "藏青金", bg: "#F7F6F1", surface: "#E8E5DB", text: "#18202F", muted: "#4A5162", accent: "#1F3B6B", onAccent: "#FFFFFF", line: "#D6D1C3" }
 };
 var PALETTE_IDS = Object.keys(PALETTES);
 
