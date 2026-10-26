@@ -29,5 +29,6 @@ const deploy = process.argv.includes('--no-deploy') ? async () => console.log('�
 
 // BREVO_API_KEY 選用：沒設定時只是不寄「網站已上線」通知信，部署照常進行
 const sendMail = process.env.BREVO_API_KEY ? makeBrevoSender({ apiKey: process.env.BREVO_API_KEY }) : undefined;
-const r = await runBuild({ siteId, versionId, mode, outDir: 'dist', db, cf, deploy, sendMail });
+const publicApi = process.env.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/site-public';
+const r = await runBuild({ siteId, versionId, mode, outDir: 'dist', db, cf, deploy, sendMail, publicApi });
 process.exit(r.ok ? 0 : 1);

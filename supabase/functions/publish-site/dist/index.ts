@@ -63,11 +63,15 @@ var LIMITS = {
   newsTitle: 60,
   room: 6,
   alt: 60,
-  social: 200
+  social: 200,
+  reviews: 6,
+  reviewName: 20,
+  reviewText: 200
 };
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
 var HERO_STYLES = ["card", "full"];
+var HOME_STYLES = ["standard", "magazine"];
 var SECTION_KEYS = ["menu", "interior", "faq", "news"];
 function emptyHours() {
   const h = {};
@@ -89,11 +93,29 @@ function emptyContent() {
     booking: { label: "", url: "" },
     photos: { hero: null, room: [] },
     heroStyle: "card",
+    homeStyle: "standard",
     menu: [],
     faq: [],
-    news: []
+    news: [],
+    // 更多內容（都是選用）
+    contactForm: false,
+    // 網站顯示聯絡表單，留言寄到網站擁有者的 Email
+    showMap: false,
+    // 來店資訊顯示 Google 地圖（依地址）
+    video: "",
+    // YouTube 影片網址
+    reviews: [],
+    // 客人評價 [{ name, text }]
+    ga4: ""
+    // Google Analytics 4 評估 ID（G-XXXXXXX），選填
   };
 }
+function youtubeId(url) {
+  const u = String(url || "").trim();
+  const m = u.match(/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#/].*)?$/);
+  return m ? m[1] : "";
+}
+var GA4_RE = /^G-[A-Z0-9]{4,15}$/;
 function defaultSections() {
   return { menu: true, interior: true, faq: true, news: true };
 }
@@ -157,6 +179,7 @@ function normalizeContent(raw) {
   c.photos.hero = photo(ph.hero);
   c.photos.room = arr(ph.room).map(photo).filter(Boolean).slice(0, LIMITS.room);
   c.heroStyle = HERO_STYLES.includes(r.heroStyle) ? r.heroStyle : "card";
+  c.homeStyle = HOME_STYLES.includes(r.homeStyle) ? r.homeStyle : "standard";
   c.menu = arr(r.menu).slice(0, LIMITS.menu).map((m) => {
     const o = m && typeof m === "object" ? m : {};
     let p = o.price;
@@ -174,6 +197,16 @@ function normalizeContent(raw) {
     const o = n && typeof n === "object" ? n : {};
     return { date: validDate(o.date) ? o.date : "", title: line(o.title, LIMITS.newsTitle) };
   });
+  c.contactForm = r.contactForm === true;
+  c.showMap = r.showMap === true;
+  const vid = youtubeId(r.video);
+  c.video = vid ? "https://www.youtube.com/watch?v=" + vid : "";
+  c.reviews = arr(r.reviews).slice(0, LIMITS.reviews).map((x) => {
+    const o = x && typeof x === "object" ? x : {};
+    return { name: line(o.name, LIMITS.reviewName), text: str(o.text, LIMITS.reviewText) };
+  });
+  const ga = String(r.ga4 || "").trim().toUpperCase();
+  c.ga4 = GA4_RE.test(ga) ? ga : "";
   return c;
 }
 function normalizePalette(p) {
@@ -400,6 +433,14 @@ function validateForPublish(content, sections, slug, raw, { checkBrand = false, 
       if (!n.title && n.date) add("news." + i, "最新消息第 " + (i + 1) + " 則缺少標題");
     });
   }
+  const rawVideo = String(raw && raw.video || "").trim();
+  if (rawVideo && !youtubeId(rawVideo)) add("video", "影片網址要是 YouTube 的影片連結（例如 https://www.youtube.com/watch?v=…）");
+  const rawGa = String(raw && raw.ga4 || "").trim();
+  if (rawGa && !GA4_RE.test(rawGa.toUpperCase())) add("ga4", "Google Analytics 評估 ID 格式是 G- 開頭（例如 G-AB12CD34EF）");
+  content.reviews.forEach((r, i) => {
+    if (r.name && !r.text) add("reviews." + i, "客人評價第 " + (i + 1) + " 則缺少內容");
+  });
+  if (content.showMap && !content.address) add("address", "要顯示地圖，請先填店家地址");
   if (template !== void 0 && !getIndustry(template)) add("template", "不支援的行業類型，請重新選擇");
   const se = slugError(slug, { allowBrand: !checkBrand });
   if (se) add("slug", se);
@@ -573,6 +614,16 @@ function makeSupabase({ url, serviceKey, fetchImpl = fetch }) {
     async list(table, query) {
       return await rest(table + "?" + query) || [];
     },
+    // 呼叫資料庫函式（RPC）
+    async rpc(fn, args) {
+      return rest("rpc/" + fn, { method: "POST", body: args || {} });
+    },
+    async count(table, query) {
+      const res = await fetchImpl(base + "/rest/v1/" + table + "?" + query + "&select=id", { method: "HEAD", headers: headers({ Prefer: "count=exact" }) });
+      if (!res.ok) throw new Error("Supabase count " + table + " → " + res.status);
+      const m = (res.headers.get("content-range") || "").match(/\/(\d+)$/);
+      return m ? Number(m[1]) : 0;
+    },
     // Storage：列出某個資料夾（prefix）底下的物件；回傳 [{name,id,created_at,...}]（資料夾的 id 為 null）
     async storageList(bucket, prefix, { offset = 0, limit = 100 } = {}) {
       const res = await fetchImpl(base + "/storage/v1/object/list/" + bucket, { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ prefix, limit, offset, sortBy: { column: "name", order: "asc" } }) });
@@ -602,7 +653,7 @@ function makeBrevoSender({ apiKey, fetchImpl = fetch, timeoutMs = 1e4 }) {
       const res = await fetchImpl("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: { "api-key": apiKey, "Content-Type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ sender: SENDER, replyTo: { email: SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
+        body: JSON.stringify({ sender: SENDER, replyTo: { email: m.replyTo || SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
         signal: AbortSignal.timeout(timeoutMs)
       });
       if (res.ok) return { ok: true };

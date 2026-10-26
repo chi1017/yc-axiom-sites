@@ -6,7 +6,8 @@ export const LIMITS = {
   name: 40, tagline: 60, intro: 600, address: 120, phone: 24, hoursNote: 80,
   bookingLabel: 12, menu: 12, menuName: 40, price: 99999,
   faq: 8, faqQ: 60, faqA: 300, news: 6, newsTitle: 60,
-  room: 6, alt: 60, social: 200
+  room: 6, alt: 60, social: 200,
+  reviews: 6, reviewName: 20, reviewText: 200
 };
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
@@ -30,9 +31,23 @@ export function emptyContent() {
     photos: { hero: null, room: [] },
     heroStyle: 'card',
     homeStyle: 'standard',
-    menu: [], faq: [], news: []
+    menu: [], faq: [], news: [],
+    // 更多內容（都是選用）
+    contactForm: false,          // 網站顯示聯絡表單，留言寄到網站擁有者的 Email
+    showMap: false,              // 來店資訊顯示 Google 地圖（依地址）
+    video: '',                   // YouTube 影片網址
+    reviews: [],                 // 客人評價 [{ name, text }]
+    ga4: ''                      // Google Analytics 4 評估 ID（G-XXXXXXX），選填
   };
 }
+
+// YouTube 網址 → 影片 ID（watch?v=、youtu.be/、shorts/、embed/、live/）；不是 YouTube 就回傳空字串
+export function youtubeId(url) {
+  const u = String(url || '').trim();
+  const m = u.match(/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#/].*)?$/);
+  return m ? m[1] : '';
+}
+export const GA4_RE = /^G-[A-Z0-9]{4,15}$/;
 export function defaultSections() { return { menu: true, interior: true, faq: true, news: true }; }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -113,6 +128,16 @@ export function normalizeContent(raw) {
     const o = n && typeof n === 'object' ? n : {};
     return { date: validDate(o.date) ? o.date : '', title: line(o.title, LIMITS.newsTitle) };
   });
+  c.contactForm = r.contactForm === true;
+  c.showMap = r.showMap === true;
+  const vid = youtubeId(r.video);
+  c.video = vid ? 'https://www.youtube.com/watch?v=' + vid : '';
+  c.reviews = arr(r.reviews).slice(0, LIMITS.reviews).map((x) => {
+    const o = x && typeof x === 'object' ? x : {};
+    return { name: line(o.name, LIMITS.reviewName), text: str(o.text, LIMITS.reviewText) };
+  });
+  const ga = String(r.ga4 || '').trim().toUpperCase();
+  c.ga4 = GA4_RE.test(ga) ? ga : '';
   return c;
 }
 
@@ -128,3 +153,4 @@ export function normalizeSections(s) {
 export const liveMenu = (c) => c.menu.filter((m) => m.name);
 export const liveFaq = (c) => c.faq.filter((f) => f.q && f.a);
 export const liveNews = (c) => c.news.filter((n) => n.title);
+export const liveReviews = (c) => c.reviews.filter((r) => r.text);

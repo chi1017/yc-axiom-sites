@@ -33,7 +33,8 @@ export function imagePlan(content) {
 }
 
 /**
- * input: { template, content, palette, sections, layout?, pages?, page?, siteUrl, preview?, imageSrc?(role, photo, plannedFile), lastmod?, headingFont? }
+ * input: { template, content, palette, sections, layout?, pages?, page?, siteUrl, preview?, imageSrc?(role, photo, plannedFile), lastmod?, headingFont?, siteId?, publicApi? }
+ *  - siteId／publicApi：聯絡表單送出與瀏覽計數用（publicApi＝Edge Function site-public 的網址）
  *  - imageVariants：true 時圖片加上 srcset（呼叫端要另外寫入 images/<role>-800.webp）
  *  - headingFont：true 時 CSS 加上標題網頁字型（呼叫端要另外寫入 fonts/heading.woff2）
  *  - template：行業 key（industries.js），所有行業共用同一套版型
@@ -67,6 +68,8 @@ export function buildSite(input) {
   const pathOf = Object.fromEntries(pageList.map((p) => [p.key, p.path]));
   const base = {
     tpl, content, paletteId, colors: getPalette(paletteId), sections, show, siteUrl, preview, layout, pageList,
+    // 聯絡表單與瀏覽計數（正式建置時由 build/run.mjs 傳入；沒有時表單顯示為示範、不送統計）
+    siteId: input.siteId || '', formAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/contact' : '', hitUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/hit' : '',
     headingFont: !preview && !!input.headingFont,   // 建置端會另外產生 fonts/heading.woff2（build/lib/heading-font.mjs）
     address: parseAddress(content.address),
     images: plan.map((p) => p.file),
@@ -112,6 +115,7 @@ export function buildSite(input) {
     pageList.filter((p) => p.path).forEach((p) => { out.files[p.path + 'index.html'] = renderPage(p).html; });
     // Cloudflare Pages 沒有 404.html 時會把所有網址都回首頁（狀態 200），有了才會回真正的 404
     out.files['404.html'] = tpl.renderNotFound(base);
+    if (content.contactForm) out.files['thanks/index.html'] = tpl.renderThanks(base);
   }
   return out;
 }
