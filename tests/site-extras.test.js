@@ -152,3 +152,79 @@ test('extras (multi): reviews + video on home and about, form + map on the visit
   assert.match(f['visit/index.html'], /id="contact"/); assert.match(f['visit/index.html'], /map-box/);
   assert.ok(!f['sitemap.xml'].includes('thanks'));
 });
+
+// ── 文章 ──
+const POSTS = [{ id: '2026-10-01-ab12', title: '秋季新豆上市', date: '2026-10-01', body: '這個秋天我們進了衣索比亞的新豆。\n\n花香明顯，適合手沖。' },
+  { id: '2026-10-20-cd34', title: '店休公告與烘豆日', date: '2026-10-20', body: '每週一店休，週二烘豆。' },
+  { id: 'BAD ID', title: '沒有代碼的文章不會上線', date: '2026-10-21', body: 'x' }];
+for (const layout of ['single', 'multi']) {
+  test('posts (' + layout + '): list + one page per post, newest first, in sitemap and llms, BlogPosting + 3-level breadcrumb, links resolve', () => {
+    const f = buildSite({ template: 'cafe', siteUrl: 'https://s.pages.dev/', ...sample, layout, content: { ...sample.content, posts: POSTS } }).files;
+    assert.ok(f['posts/index.html'] && f['posts/2026-10-01-ab12/index.html'] && f['posts/2026-10-20-cd34/index.html']);
+    assert.equal(Object.keys(f).filter((k) => k.startsWith('posts/')).length, 3);
+    const list = f['posts/index.html'];
+    assert.ok(list.indexOf('店休公告') < list.indexOf('秋季新豆'), 'newest first');
+    assert.match(f['sitemap.xml'], /posts\/2026-10-01-ab12\//); assert.match(f['llms.txt'], /秋季新豆上市/);
+    const post = f['posts/2026-10-01-ab12/index.html'];
+    assert.match(post, /"@type":"BlogPosting"/); assert.match(post, /"position":3/); assert.match(post, /<link rel="canonical" href="https:\/\/s\.pages\.dev\/posts\/2026-10-01-ab12\/">/);
+    assert.match(post, /<p>花香明顯，適合手沖。<\/p>/); assert.ok(!/FAQPage/.test(post));
+    assert.match(post, /href="\.\.\/\.\.\/posts\/"/, "link back to list");
+    assert.match(f['index.html'], /id="posts"/); assert.match(f['index.html'], /href="posts\/2026-10-20-cd34\/"/);
+    if (layout === 'single') assert.match(post, /href="\.\.\/\.\.\/#about"/, 'one-page anchors go back to home');
+    else assert.match(post, /href="\.\.\/\.\.\/about\/"/);
+  });
+}
+
+// ── 線上預約 ──
+import { checkBooking } from '../templates/shared/booking.js';
+const HOURS = { mon: { closed: true }, tue: { open: '09:00', close: '18:00' }, sat: { open: '18:00', close: '02:00' } };
+test('checkBooking: dates in range, closed days, opening hours (incl. past midnight)', () => {
+  const T = '2026-10-26';   // 週一
+  assert.equal(checkBooking({ hours: HOURS, date: '2026-10-25', time: '10:00', today: T }).ok, false);
+  assert.match(checkBooking({ hours: HOURS, date: '2026-11-02', time: '10:00', today: T }).msg, /公休/);
+  assert.equal(checkBooking({ hours: HOURS, date: '2026-10-27', time: '10:00', today: T }).ok, true);
+  assert.match(checkBooking({ hours: HOURS, date: '2026-10-27', time: '19:00', today: T }).msg, /營業時間/);
+  assert.equal(checkBooking({ hours: HOURS, date: '2026-10-31', time: '01:00', today: T }).ok, true);
+  assert.equal(checkBooking({ hours: HOURS, date: '2027-03-01', time: '10:00', today: T }).ok, false);
+  assert.equal(checkBooking({ hours: HOURS, date: '2026-10-29', time: '10:00', today: T }).ok, true, 'days without hours are allowed');
+  assert.equal(checkBooking({ hours: HOURS, date: 'x', time: '10:00', today: T }).ok, false);
+});
+test('booking route: stores kind=booking with meta, email subject has date/time, rejects closed days', async () => {
+  const p = pub({ site: { content: { name: '好喝咖啡', hours: HOURS } } });
+  const r = await handlePublic(new Request('https://x/functions/v1/site-public/booking', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ site: SID, name: '王小明', contact: '0912345678', date: '2026-10-27', time: '14:00', people: '3', message: '靠窗' }).toString() }), { db: { getOne: async (t) => (t === 'rental_sites' ? p.s : { email: 'o@x.tw' }), count: async () => 0, insertReturning: async (t, b) => { p.log.inserts.push(b); return { id: 'm' }; }, patch: async () => {} }, now: () => NOW, sendMail: async (m) => { p.log.mails.push(m); return { ok: true }; } });
+  assert.equal(r.status, 303);
+  assert.equal(p.log.inserts[0].kind, 'booking'); assert.deepEqual(p.log.inserts[0].meta, { date: '2026-10-27', time: '14:00', people: 3 });
+  assert.match(p.log.inserts[0].message, /2026\/10\/27 14:00・3 人\n備註：靠窗/);
+  assert.match(p.log.mails[0].subject, /預約申請：2026\/10\/27 14:00 王小明/);
+  const closed = await handlePublic(new Request('https://x/functions/v1/site-public/booking', { method: 'POST', body: new URLSearchParams({ site: SID, name: 'a', contact: 'b', date: '2026-11-02', time: '10:00' }).toString() }), { db: { getOne: async () => p.s, count: async () => 0 }, now: () => NOW });
+  assert.match(await closed.text(), /公休/);
+});
+test('booking form: shows on the visit page (multi) / before visit (single), people for cafes, item select for salons, hero button', () => {
+  const c = { ...sample.content, bookingForm: true, booking: { label: '', url: '' } };
+  const single = buildSite({ template: 'cafe', siteUrl: 'https://s.pages.dev/', ...sample, content: c, siteId: SID, publicApi: API }).files['index.html'];
+  assert.match(single, /id="booking"/); assert.match(single, /name="people"/); assert.match(single, new RegExp('action="' + API + '/booking"'));
+  assert.match(single, /<a class="btn" href="#booking">線上預約<\/a>/);
+  const multi = buildSite({ template: 'salon', siteUrl: 'https://s.pages.dev/', ...sample, content: c, layout: 'multi', siteId: SID, publicApi: API }).files;
+  assert.match(multi['visit/index.html'], /id="booking"/); assert.ok(!/id="booking"/.test(multi['index.html']));
+  assert.match(multi['visit/index.html'], /name="item"/); assert.ok(!/name="people"/.test(multi['visit/index.html']));
+  assert.match(multi['index.html'], /href="visit\/#booking"/);
+  assert.ok(multi['thanks/index.html']);
+});
+
+// ── 英文版 ──
+test('english page: /en/ with hreflang both ways, English hours and LD, sitemap, footer link; off or incomplete → no page', () => {
+  const en = { enabled: true, name: 'Afternoon Sun Coffee', tagline: 'Pour-over coffee and home-baked desserts', intro: 'A small independent café in Lingya, Kaohsiung.\n\nWe roast weekly.', address: 'No. 100, Siwei 3rd Rd., Lingya Dist., Kaohsiung' };
+  const f = buildSite({ template: 'cafe', siteUrl: 'https://s.pages.dev/', ...sample, content: { ...sample.content, en }, imageVariants: true }).files;
+  const p = f['en/index.html'];
+  assert.match(p, /<html lang="en">/); assert.match(p, /<link rel="canonical" href="https:\/\/s\.pages\.dev\/en\/">/);
+  assert.match(p, /hreflang="zh-Hant" href="https:\/\/s\.pages\.dev\/"/); assert.match(p, /Tue–Fri 09:00–18:00|Mon Closed/);
+  assert.match(p, /"inLanguage":"en"/); assert.match(p, /"alternateName":"午後日光咖啡"/); assert.match(p, /Menu &amp; Prices/);
+  assert.match(p, /srcset="\.\.\/images\/hero-480\.webp/);
+  assert.match(f['index.html'], /hreflang="en" href="https:\/\/s\.pages\.dev\/en\/"/); assert.match(f['index.html'], /href="en\/" hreflang="en"/);
+  assert.match(f['sitemap.xml'], /\/en\//);
+  assert.ok(!buildSite({ template: 'cafe', siteUrl: 'https://s.pages.dev/', ...sample, content: { ...sample.content, en: { ...en, enabled: false } } }).files['en/index.html']);
+  assert.ok(!buildSite({ template: 'cafe', siteUrl: 'https://s.pages.dev/', ...sample, content: { ...sample.content, en: { ...en, intro: '' } } }).files['en/index.html']);
+  const v = validateForPublish(normalizeContent({ ...sample.content, en: { enabled: true } }), sample.sections, 'shop-a');
+  assert.ok(v.errors.some((e) => e.field === 'en'));
+});

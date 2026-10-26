@@ -1,8 +1,9 @@
 // 瀏覽器預覽與 Node 建置共用的入口：同一份內容 → 同一份 HTML。
-import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews } from './content.js';
+import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews, livePosts } from './content.js';
+import { clip } from './escape.js';
 import { getPalette } from './palettes.js';
 import { getTemplate } from './registry.js';
-import { buildTitle, buildDescription, pageTitle, pageDescription, pageLead, absUrl, robotsTxt, sitemapXml, llmsTxt } from './seo.js';
+import { buildTitle, buildDescription, pageTitle, pageDescription, pageLead, fitDescription, absUrl, robotsTxt, sitemapXml, llmsTxt } from './seo.js';
 import { normalizeLayout, normalizePages, enabledPages } from './pages.js';
 import { parseAddress } from './region.js';
 
@@ -69,36 +70,61 @@ export function buildSite(input) {
   const base = {
     tpl, content, paletteId, colors: getPalette(paletteId), sections, show, siteUrl, preview, layout, pageList,
     // 聯絡表單與瀏覽計數（正式建置時由 build/run.mjs 傳入；沒有時表單顯示為示範、不送統計）
-    siteId: input.siteId || '', formAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/contact' : '', hitUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/hit' : '',
+    siteId: input.siteId || '', bookingAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/booking' : '', formAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/contact' : '', hitUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/hit' : '',
     headingFont: !preview && !!input.headingFont,   // 建置端會另外產生 fonts/heading.woff2（build/lib/heading-font.mjs）
     address: parseAddress(content.address),
     images: plan.map((p) => p.file),
     heroFile: fileOf.hero || '',
     pageLinks: pageList.map((p) => ({ label: p.label, path: p.path }))
   };
-  const renderPage = (pg) => {
-    const depth = pg.path ? 1 : 0;
-    const up = depth ? '../' : '';
+  // srcset：原圖寬度大於小圖才提供；寬度不明時當作 1600（編輯器上傳上限）
+  const srcsetFor = (up) => (role) => {
+    const p = planOf[role]; if (!variants || !p) return '';
+    const w = p.w || 1600;
+    const smaller = p.variants.filter((v) => v.w < w);
+    return smaller.length ? smaller.map((v) => up + v.file + ' ' + v.w + 'w').concat(up + p.file + ' ' + w + 'w').join(', ') : '';
+  };
+  const posts = livePosts(content);
+  const hasEn = content.en.enabled && !!content.en.name && !!content.en.intro;
+  const renderPage = (pg, extra = {}) => {
+    const depth = extra.depth != null ? extra.depth : (pg.path ? 1 : 0);
+    const up = '../'.repeat(depth);
     // 建置時不傳 imageSrc → 一律用 images/ 相對路徑（子頁加 ../）；預覽頁傳入 Supabase 公開網址
     const imageSrc = (role, photo) => (input.imageSrc ? input.imageSrc(role, photo, fileOf[role]) : (fileOf[role] ? up + fileOf[role] : ''));
     const href = (key) => (key === 'home' ? (up || './') : up + (pathOf[key] || ''));
     // srcset：原圖寬度大於 800 才提供小圖；寬度不明時當作 1600（編輯器上傳上限）
-    const srcsetOf = (role) => {
-      const p = planOf[role]; if (!variants || !p) return '';
-      const w = p.w || 1600;
-      const smaller = p.variants.filter((v) => v.w < w);
-      return smaller.length ? smaller.map((v) => up + v.file + ' ' + v.w + 'w').concat(up + p.file + ' ' + w + 'w').join(', ') : '';
-    };
+    const srcsetOf = srcsetFor(up);
     const model = {
       ...base, page: pg.key, pageInfo: multi ? pg : null, imageSrc, srcsetOf, href,
+      postsHref: up + 'posts/', postHref: (id) => up + 'posts/' + id + '/', anchorBase: depth ? up : '', enHref: up + 'en/',
+      // 英文版開啟時，中文首頁與英文頁用 hreflang 互相對應
+      alternates: hasEn && pg.key === 'home' ? [['zh-Hant', siteUrl], ['en', absUrl(siteUrl, 'en/')], ['x-default', siteUrl]] : null,
       pageUrl: absUrl(siteUrl, pg.path),
       // FAQPage：一頁版在首頁；多頁版在常見問題頁（全部）與首頁（前幾題，與畫面上顯示的一致）
       faqOnPage: multi ? (pg.key === 'faq' ? true : pg.key === 'home' ? 'teaser' : false) : true,
       title: multi ? pageTitle(content, tpl, pg) : buildTitle(content, tpl),
       description: multi ? pageDescription(content, tpl, pg) : buildDescription(content, tpl),
-      lead: multi ? pageLead(content, tpl, pg) : ''
+      lead: multi ? pageLead(content, tpl, pg) : '',
+      ...(extra.model || {})
     };
     return { html: tpl.render(model), title: model.title, description: model.description };
+  };
+  // 文章列表頁與每篇文章頁（一頁版、多頁版都有）
+  const name = content.name || '本店';
+  const homeCrumb = { name, url: siteUrl };
+  const renderPostList = () => renderPage({ key: 'posts', label: '文章', path: 'posts/' }, { depth: 1, model: {
+    pageInfo: { key: 'posts', label: '文章' }, faqOnPage: false,
+    title: pageTitle(content, tpl, { key: 'posts', label: '文章' }), description: fitDescription(clip(name + '的文章：' + posts.slice(0, 5).map((p) => p.title).join('、'), 100) + '。', content, tpl), lead: name + '的文章與分享。',
+    crumbs: [homeCrumb, { name: '文章', url: absUrl(siteUrl, 'posts/') }] } });
+  const renderPost = (post) => {
+    const url = absUrl(siteUrl, 'posts/' + post.id + '/');
+    const desc = fitDescription(clip(post.body.replace(/\s+/g, ' '), 120), content, tpl);
+    return renderPage({ key: 'post', label: post.title, path: 'posts/' + post.id + '/' }, { depth: 2, model: {
+      post, pageInfo: { key: 'post', label: post.title }, faqOnPage: false, title: post.title + '｜' + name, description: desc,
+      crumbs: [homeCrumb, { name: '文章', url: absUrl(siteUrl, 'posts/') }, { name: post.title, url }],
+      extraLd: [{ '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, datePublished: post.date || undefined, dateModified: post.date || undefined,
+        mainEntityOfPage: url, url, description: desc, author: { '@type': 'Organization', name, url: siteUrl }, publisher: { '@id': siteUrl + '#business' },
+        ...(fileOf.hero ? { image: absUrl(siteUrl, fileOf.hero) } : {}) }] } });
   };
   const want = pageList.find((p) => p.key === input.page) || pageList[0];
   const main = renderPage(want);
@@ -109,13 +135,22 @@ export function buildSite(input) {
     out.files = {
       'index.html': home.html,
       'robots.txt': robotsTxt(siteUrl),
-      'sitemap.xml': sitemapXml(siteUrl, lastmod, pageList.map((p) => p.path)),
+      'sitemap.xml': sitemapXml(siteUrl, lastmod, pageList.map((p) => p.path).concat(posts.length ? ['posts/', ...posts.map((p) => 'posts/' + p.id + '/')] : []).concat(hasEn ? ['en/'] : [])),
       'llms.txt': llmsTxt({ ...base, title: home.title, description: home.description })
     };
     pageList.filter((p) => p.path).forEach((p) => { out.files[p.path + 'index.html'] = renderPage(p).html; });
     // Cloudflare Pages 沒有 404.html 時會把所有網址都回首頁（狀態 200），有了才會回真正的 404
     out.files['404.html'] = tpl.renderNotFound(base);
-    if (content.contactForm) out.files['thanks/index.html'] = tpl.renderThanks(base);
+    if (content.contactForm || content.bookingForm) out.files['thanks/index.html'] = tpl.renderThanks(base);
+    if (hasEn) {
+      const enModel = { ...base, page: 'en', pageInfo: null, href: (k) => '../' + (k === 'home' ? '' : (pathOf[k] || '')), imageSrc: (role) => (fileOf[role] ? '../' + fileOf[role] : ''),
+        srcsetOf: srcsetFor('../'), pageUrl: absUrl(siteUrl, 'en/'), title: content.en.name, description: content.en.intro };
+      out.files['en/index.html'] = tpl.renderEn(enModel);
+    }
+    if (posts.length) {
+      out.files['posts/index.html'] = renderPostList().html;
+      posts.forEach((p) => { out.files['posts/' + p.id + '/index.html'] = renderPost(p).html; });
+    }
   }
   return out;
 }

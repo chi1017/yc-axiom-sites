@@ -1,7 +1,9 @@
 // 客戶網站對外的 Edge Function（不需登入）：
 //   POST …/site-public/contact  聯絡表單（一般 HTML 表單送出，不需要 JavaScript）→ 存進 site_messages、寄信給店家 → 導回網站的感謝頁
+//   POST …/site-public/booking  線上預約申請（同上，另外檢查日期時間是否在營業時間內）
 //   POST …/site-public/hit      瀏覽計數（網站用 sendBeacon 送出）→ 每日每頁的次數，不記錄個人資料
 import { UUID } from '../_shared/http.mjs';
+import { checkBooking } from '../../../templates/shared/booking.js';
 
 export const LIMITS = { name: 60, contact: 120, message: 2000, perIpHour: 5, perSiteDay: 100 };
 const LIVE = ['live', 'overdue'];
@@ -25,11 +27,12 @@ const page = (title, text, back) => new Response('<!doctype html><html lang="zh-
   (back ? '<p><a href="' + esc(back) + '">回到網站</a></p>' : '<p><a href="javascript:history.back()">回上一頁</a></p>') + '</body></html>',
   { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 
-export function shopMessageEmail({ shopName, name, contact, message, base }) {
-  const subject = '「' + shopName + '」網站留言：' + name;
-  const text = shopName + ' 你好，\n\n有人透過網站的聯絡表單留言給你：\n\n姓名：' + name + '\n聯絡方式：' + contact + '\n\n' + message + '\n\n' +
+export function shopMessageEmail({ shopName, name, contact, message, base, kind = 'message', when = '' }) {
+  const subject = '「' + shopName + '」' + (kind === 'booking' ? '預約申請：' + when + ' ' : '網站留言：') + name;
+  const intro = kind === 'booking' ? '有人透過網站送出預約申請，請與對方聯絡確認（網站不會自動保留時段）：' : '有人透過網站的聯絡表單留言給你：';
+  const text = shopName + ' 你好，\n\n' + intro + '\n\n姓名：' + name + '\n聯絡方式：' + contact + '\n\n' + message + '\n\n' +
     (EMAIL.test(contact) ? '直接回覆這封信，就會寄給對方。\n' : '請用對方留下的聯絡方式回覆。\n') + '所有留言也可以在會員專區查看。\n\n網站：' + base;
-  const html = '<p>' + esc(shopName) + ' 你好，</p><p>有人透過網站的聯絡表單留言給你：</p>' +
+  const html = '<p>' + esc(shopName) + ' 你好，</p><p>' + esc(intro) + '</p>' +
     '<table style="border-collapse:collapse"><tr><td style="padding:2px 12px 2px 0;color:#777">姓名</td><td>' + esc(name) + '</td></tr><tr><td style="padding:2px 12px 2px 0;color:#777">聯絡方式</td><td>' + esc(contact) + '</td></tr></table>' +
     '<p style="white-space:pre-wrap;border-left:3px solid #ccc;padding-left:12px">' + esc(message) + '</p>' +
     '<p style="color:#777;font-size:14px">' + (EMAIL.test(contact) ? '直接回覆這封信，就會寄給對方。' : '請用對方留下的聯絡方式回覆。') + '所有留言也可以在會員專區查看。</p>';
@@ -43,7 +46,8 @@ export async function handlePublic(req, deps) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'content-type' } });
   if (req.method !== 'POST') return new Response('method not allowed', { status: 405 });
   if (route === 'hit') return hit(req, deps);
-  if (route === 'contact') return contact(req, deps);
+  if (route === 'contact') return contact(req, deps, 'message');
+  if (route === 'booking') return contact(req, deps, 'booking');
   return new Response('not found', { status: 404 });
 }
 
@@ -59,7 +63,7 @@ async function hit(req, deps) {
   return ok;
 }
 
-async function contact(req, deps) {
+async function contact(req, deps, kind) {
   let f;
   try { const t = await req.text(); if (t.length > 12000) return page('留言太長', '請縮短內容後再送出。'); f = new URLSearchParams(t); } catch { return page('送出失敗', '請稍後再試一次。'); }
   const siteId = f.get('site') || '';
@@ -70,24 +74,35 @@ async function contact(req, deps) {
   const thanks = base ? base + 'thanks/' : '';
   // 機器人陷阱：看不見的欄位有值就當作已送出（不告訴機器人被擋）
   if (f.get('website')) return thanks ? Response.redirect(thanks, 303) : page('已送出', '謝謝你的留言。');
-  const name = clean(f.get('name'), LIMITS.name), contactV = clean(f.get('contact'), LIMITS.contact), message = clean(f.get('message'), LIMITS.message);
+  const now = (deps.now || (() => new Date()))();
+  const name = clean(f.get('name'), LIMITS.name), contactV = clean(f.get('contact'), LIMITS.contact);
+  let message = clean(f.get('message'), LIMITS.message), meta = null, when = '';
+  if (kind === 'booking') {
+    const date = clean(f.get('date'), 10), time = clean(f.get('time'), 5);
+    const people = Math.max(0, Math.min(50, parseInt(f.get('people') || '0', 10) || 0)), item = clean(f.get('item'), 60);
+    const today = new Date(now.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const chk = checkBooking({ hours: (site.content && site.content.hours) || {}, date, time, today });
+    if (!chk.ok) return page('預約時間需要調整', chk.msg + '。', base);
+    when = date.replace(/-/g, '/') + ' ' + time;
+    meta = { date, time, ...(people ? { people } : {}), ...(item ? { item } : {}) };
+    message = '預約：' + when + (people ? '・' + people + ' 人' : '') + (item ? '・' + item : '') + (message ? '\n備註：' + message : '');
+  }
   if (!name || !contactV || !message) return page('還有欄位沒填', '請填寫姓名、聯絡方式與留言內容。');
   if ((message.match(/https?:\/\//gi) || []).length > 2) return page('送出失敗', '留言裡的網址太多，請刪減後再送出。');
 
-  const now = (deps.now || (() => new Date()))();
   const ip = (req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || '').split(',')[0].trim();
   const ipHash = ip ? (await sha256((deps.salt || '') + '|' + now.toISOString().slice(0, 10) + '|' + ip)).slice(0, 32) : null;
   const hourAgo = new Date(now.getTime() - 3600 * 1000).toISOString(), dayAgo = new Date(now.getTime() - 86400 * 1000).toISOString();
   if (ipHash && (await deps.db.count('site_messages', 'ip_hash=eq.' + ipHash + '&created_at=gte.' + encodeURIComponent(hourAgo))) >= LIMITS.perIpHour) return page('送出太頻繁', '請稍後再試，或直接用電話、LINE 聯絡店家。', base);
   if ((await deps.db.count('site_messages', 'site_id=eq.' + siteId + '&created_at=gte.' + encodeURIComponent(dayAgo))) >= LIMITS.perSiteDay) return page('暫時無法留言', '今天的留言已經很多了，請改用電話或 LINE 聯絡店家。', base);
 
-  const row = await deps.db.insertReturning('site_messages', { site_id: siteId, name, contact: contactV, message, ip_hash: ipHash });
+  const row = await deps.db.insertReturning('site_messages', { site_id: siteId, name, contact: contactV, message, ip_hash: ipHash, kind, ...(meta ? { meta } : {}) });
   const owner = await deps.db.getOne('members', 'id=eq.' + site.member_id + '&select=email');
   if (owner && owner.email && deps.sendMail) {
     const shopName = (site.content && site.content.name) || '你的網站';
-    const m = shopMessageEmail({ shopName, name, contact: contactV, message, base });
+    const m = shopMessageEmail({ shopName, name, contact: contactV, message, base, kind, when });
     const r = await deps.sendMail({ to: owner.email, ...m, ...(EMAIL.test(contactV) ? { replyTo: contactV } : {}) }).catch(() => ({ ok: false }));
     if (r && r.ok && row && row.id) await deps.db.patch('site_messages', 'id=eq.' + row.id, { emailed: true }).catch(() => {});
   }
-  return thanks ? Response.redirect(thanks, 303) : page('已送出', '謝謝你的留言，店家會盡快回覆你。');
+  return thanks ? Response.redirect(thanks, 303) : page('已送出', kind === 'booking' ? '已收到你的預約申請，店家確認後會與你聯絡。' : '謝謝你的留言，店家會盡快回覆你。');
 }
