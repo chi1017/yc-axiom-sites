@@ -107,8 +107,94 @@ async function domainAction(action, ctx) {
   return fail("bad_request", "不支援的動作");
 }
 
+// supabase/functions/_shared/ecpay.mjs
+var ECPAY_TEST = { merchantId: "3002607", hashKey: "pwFHCqoQZGmho4w6", hashIV: "EkRm7iFT261dpevs" };
+var ECPAY_URL = {
+  stage: { checkout: "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5", period: "https://payment-stage.ecpay.com.tw/Cashier/CreditCardPeriodAction" },
+  prod: { checkout: "https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5", period: "https://payment.ecpay.com.tw/Cashier/CreditCardPeriodAction" }
+};
+function ecpayConfig(env = {}) {
+  const prod = env.ECPAY_ENV === "prod" && env.ECPAY_MERCHANT_ID && env.ECPAY_HASH_KEY && env.ECPAY_HASH_IV;
+  return prod ? { mode: "prod", merchantId: env.ECPAY_MERCHANT_ID, hashKey: env.ECPAY_HASH_KEY, hashIV: env.ECPAY_HASH_IV, ...ECPAY_URL.prod } : { mode: "stage", ...ECPAY_TEST, ...ECPAY_URL.stage };
+}
+function dotnetEncode(s) {
+  return encodeURIComponent(s).replace(/%20/g, "+").replace(/~/g, "%7e").replace(/'/g, "%27");
+}
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function checkMac(params, { hashKey, hashIV }) {
+  const keys = Object.keys(params).filter((k) => k !== "CheckMacValue").sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const raw = "HashKey=" + hashKey + "&" + keys.map((k) => k + "=" + params[k]).join("&") + "&HashIV=" + hashIV;
+  return (await sha256Hex(dotnetEncode(raw).toLowerCase())).toUpperCase();
+}
+function ecpayDate(d) {
+  const t = new Date(d.getTime() + 8 * 3600 * 1e3).toISOString();
+  return t.slice(0, 10).replace(/-/g, "/") + " " + t.slice(11, 19);
+}
+function newTradeNo(now = /* @__PURE__ */ new Date()) {
+  const r = [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(36).padStart(2, "0")).join("").slice(0, 6).toUpperCase();
+  return ("YC" + now.getTime().toString(36).toUpperCase() + r).slice(0, 20);
+}
+async function checkoutFields(order, cfg) {
+  const f = {
+    MerchantID: cfg.merchantId,
+    MerchantTradeNo: order.tradeNo,
+    MerchantTradeDate: ecpayDate(order.now || /* @__PURE__ */ new Date()),
+    PaymentType: "aio",
+    TotalAmount: String(order.amount),
+    TradeDesc: "網站租用",
+    ItemName: order.itemName,
+    ReturnURL: order.returnUrl,
+    ChoosePayment: order.kind === "atm" ? "ATM" : "Credit",
+    EncryptType: "1"
+  };
+  if (order.clientBackUrl) f.ClientBackURL = order.clientBackUrl;
+  if (order.custom1) f.CustomField1 = order.custom1;
+  if (order.kind === "atm") {
+    f.ExpireDate = "3";
+    if (order.paymentInfoUrl) f.PaymentInfoURL = order.paymentInfoUrl;
+  }
+  if (order.kind === "card_monthly") {
+    f.PeriodAmount = String(order.amount);
+    f.PeriodType = "M";
+    f.Frequency = "1";
+    f.ExecTimes = "99";
+    if (order.periodReturnUrl) f.PeriodReturnURL = order.periodReturnUrl;
+  }
+  f.CheckMacValue = await checkMac(f, cfg);
+  return f;
+}
+async function cancelPeriod(tradeNo, cfg, fetchImpl = fetch, now = /* @__PURE__ */ new Date()) {
+  const p = { MerchantID: cfg.merchantId, MerchantTradeNo: tradeNo, Action: "Cancel", TimeStamp: String(Math.floor(now.getTime() / 1e3)) };
+  p.CheckMacValue = await checkMac(p, cfg);
+  const res = await fetchImpl(cfg.period, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(p).toString(), signal: AbortSignal.timeout(1e4) });
+  const out = Object.fromEntries(new URLSearchParams(await res.text()));
+  return { ok: out.RtnCode === "1", code: out.RtnCode, message: out.RtnMsg || "" };
+}
+
+// supabase/functions/_shared/plans.mjs
+var PLANS = {
+  single: { name: "自架版（一頁）", monthly: 599, yearPaidMonths: 10 },
+  multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
+};
+var planFor = (layout) => layout === "multi" ? PLANS.multi : PLANS.single;
+var PAY_OPTIONS = {
+  card_monthly: { label: "信用卡每月自動扣款", kind: "card_monthly", months: 1 },
+  card_year: { label: "信用卡一次付 12 個月", kind: "card", months: 12 },
+  atm_1: { label: "ATM 轉帳 1 個月", kind: "atm", months: 1 },
+  atm_12: { label: "ATM 轉帳 12 個月", kind: "atm", months: 12 }
+};
+function priceFor(layout, months) {
+  const p = planFor(layout);
+  const years = Math.floor(months / 12);
+  return (years * p.yearPaidMonths + months % 12) * p.monthly;
+}
+
 // supabase/functions/member-site/handler.mjs
-var ACTIONS = ["set_domain", "check_domain", "clear_domain"];
+var ACTIONS = ["set_domain", "check_domain", "clear_domain", "pay_options", "checkout", "cancel_recurring"];
+var PAYABLE = ["pending", "live", "overdue", "suspended"];
 async function handleMember(req, deps) {
   const cors = corsHeaders(req, deps.allowedOrigins);
   const reply = (b, s) => json(b, s, cors);
@@ -134,6 +220,7 @@ async function handleMember(req, deps) {
   const site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
   if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   const fail = (error, message, status = 400) => reply({ error, message }, status);
+  if (["pay_options", "checkout", "cancel_recurring"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === "set_domain" && !["live", "overdue"].includes(site.status)) return fail("not_allowed", "網站上線後才能綁定自己的網域", 409);
   const by = "member:" + (user.email || user.id);
   const event = (type, detail) => db2.insert("site_events", { site_id: siteId, type, detail: { ...detail, by } }).catch(() => {
@@ -144,6 +231,57 @@ async function handleMember(req, deps) {
     return d;
   }
   return domainAction(body.action, { site, siteId, body, db: db2, cf: deps.cf, event, queueDeploy, reply, fail, audience: "member" });
+}
+async function payAction(body, site, user, deps, reply, fail) {
+  const cfg = deps.ecpay;
+  const enabled = !!cfg && !!deps.publicApi && (cfg.mode === "prod" || user.isAdmin);
+  const { db: db2 } = deps;
+  const now = (deps.now || (() => /* @__PURE__ */ new Date()))();
+  const plan = planFor(site.layout);
+  if (body.action === "pay_options") {
+    if (!enabled) return reply({ ok: true, enabled: false }, 200);
+    const active = await db2.getOne("pay_orders", "site_id=eq." + site.id + "&kind=eq.card_monthly&status=eq.active&select=trade_no,success_times,amount");
+    return reply({
+      ok: true,
+      enabled: PAYABLE.includes(site.status),
+      test: cfg.mode !== "prod",
+      plan: plan.name,
+      recurring: active || null,
+      options: Object.entries(PAY_OPTIONS).filter(([k]) => !(active && k === "card_monthly")).map(([key, o]) => ({ key, label: o.label, months: o.months, amount: priceFor(site.layout, o.months) }))
+    }, 200);
+  }
+  if (!enabled) return fail("not_enabled", "線上付款尚未開放，請先用銀行轉帳", 409);
+  if (body.action === "cancel_recurring") {
+    const active = await db2.getOne("pay_orders", "site_id=eq." + site.id + "&kind=eq.card_monthly&status=eq.active&select=trade_no");
+    if (!active) return fail("no_recurring", "這個網站沒有設定每月自動扣款", 409);
+    const r = await cancelPeriod(active.trade_no, cfg, deps.fetchImpl, now).catch((e) => ({ ok: false, message: String(e.message || e) }));
+    if (!r.ok) return fail("ecpay_error", "取消失敗：" + (r.message || "請稍後再試"), 502);
+    await db2.patch("pay_orders", "trade_no=eq." + active.trade_no, { status: "cancelled", updated_at: now.toISOString() });
+    await db2.insert("site_events", { site_id: site.id, type: "recurring_cancelled", detail: { trade_no: active.trade_no, by: "member:" + (user.email || user.id) } }).catch(() => {
+    });
+    return reply({ ok: true, message: "已取消每月自動扣款。目前已付的期間不受影響，到期前會再寄提醒。" }, 200);
+  }
+  const opt = PAY_OPTIONS[body.option];
+  if (!opt) return fail("bad_request", "請選擇付款方式");
+  if (!PAYABLE.includes(site.status)) return fail("not_allowed", site.status === "draft" ? "請先在編輯器按「發佈」送出上線申請，再付款" : "這個網站目前無法付款", 409);
+  if (opt.kind === "card_monthly" && await db2.getOne("pay_orders", "site_id=eq." + site.id + "&kind=eq.card_monthly&status=eq.active&select=trade_no")) return fail("already_recurring", "這個網站已經設定每月自動扣款", 409);
+  const amount = priceFor(site.layout, opt.months);
+  const tradeNo = newTradeNo(now);
+  await db2.insert("pay_orders", { trade_no: tradeNo, site_id: site.id, member_id: site.member_id, kind: opt.kind, months: opt.months, amount, test: cfg.mode !== "prod" });
+  const api = deps.publicApi.replace(/\/$/, "");
+  const shop = String(site.content && site.content.name || site.slug).replace(/[#&]/g, " ").slice(0, 30);
+  const fields = await checkoutFields({
+    tradeNo,
+    amount,
+    kind: opt.kind,
+    now,
+    itemName: "網站租用 " + plan.name + " " + (opt.kind === "card_monthly" ? "每月" : opt.months + " 個月") + "（" + shop + "）",
+    returnUrl: api + "/ecpay",
+    periodReturnUrl: api + "/ecpay-period",
+    paymentInfoUrl: api + "/ecpay-info",
+    clientBackUrl: deps.dashboardUrl || void 0
+  }, cfg);
+  return reply({ ok: true, action: cfg.checkout, fields, test: cfg.mode !== "prod" }, 200);
 }
 
 // build/lib/supabase.mjs
@@ -317,4 +455,15 @@ var dispatch = makeDispatcher({ token: Deno.env.get("GITHUB_DISPATCH_TOKEN") || 
 var CF_TOKEN = Deno.env.get("CLOUDFLARE_API_TOKEN") || "";
 var CF_ACCOUNT = Deno.env.get("CLOUDFLARE_ACCOUNT_ID") || "";
 var cf = CF_TOKEN && CF_ACCOUNT ? makeCloudflare({ token: CF_TOKEN, accountId: CF_ACCOUNT }) : void 0;
-Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf }));
+var ecpay = ecpayConfig({ ECPAY_ENV: Deno.env.get("ECPAY_ENV"), ECPAY_MERCHANT_ID: Deno.env.get("ECPAY_MERCHANT_ID"), ECPAY_HASH_KEY: Deno.env.get("ECPAY_HASH_KEY"), ECPAY_HASH_IV: Deno.env.get("ECPAY_HASH_IV") });
+var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
+Deno.serve((req) => handleMember(req, {
+  allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")),
+  db,
+  getUser,
+  dispatch,
+  cf,
+  ecpay,
+  publicApi: SUPABASE_URL.replace(/\/$/, "") + "/functions/v1/site-public",
+  dashboardUrl: SITE_BASE + "dashboard/"
+}));
