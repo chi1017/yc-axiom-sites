@@ -79,8 +79,18 @@ var LIMITS = {
   shopDesc: 200,
   shopPrice: 2e5,
   shopNote: 300,
-  deposit: 1e5
+  deposit: 1e5,
+  blocks: 6,
+  blockTitle: 40,
+  blockBody: 1500,
+  btnLabel: 16,
+  seoTitle: 60,
+  seoDesc: 160
 };
+var ORDER_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "blocks", "booking", "visit", "contact"];
+var BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
+var FONTS = ["serif", "sans", "round", "kai"];
+var BUTTONS = ["pill", "round", "square"];
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
 var HERO_STYLES = ["card", "full"];
@@ -130,8 +140,16 @@ function emptyContent() {
     // 線上購買：店家用自己的綠界帳號收款（金鑰在會員專區設定，不放在內容裡）
     shop: { enabled: false, items: [], note: "" },
     // items: [{ id, name, price, desc, photo }]
-    bookingDeposit: 0
+    bookingDeposit: 0,
     // 線上預約要先付的訂金（0＝不收）
+    order: [],
+    // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
+    blocks: [],
+    // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
+    style: { font: "serif", button: "pill", floatLine: false },
+    // 標題字型、按鈕形狀、LINE 浮動按鈕
+    seo: { title: "", description: "", share: null }
+    // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
 }
 function youtubeId(url) {
@@ -264,6 +282,28 @@ function normalizeContent(raw) {
     })
   };
   c.bookingDeposit = intIn(r.bookingDeposit, 0, LIMITS.deposit) || 0;
+  const bids = /* @__PURE__ */ new Set();
+  c.blocks = arr(r.blocks).slice(0, LIMITS.blocks).map((x) => {
+    const o = x && typeof x === "object" ? x : {};
+    let id = String(o.id || "").toLowerCase();
+    if (!BLOCK_ID_RE.test(id) || bids.has(id)) id = "";
+    if (id) bids.add(id);
+    return {
+      id,
+      title: line(o.title, LIMITS.blockTitle),
+      body: str(o.body, LIMITS.blockBody),
+      photo: photo(o.photo),
+      btnLabel: line(o.btnLabel, LIMITS.btnLabel),
+      btnUrl: clip(safeHttpsUrl(o.btnUrl), 500),
+      side: o.side === "left" ? "left" : "right",
+      hidden: o.hidden === true
+    };
+  }).filter((b2) => b2.id);
+  c.order = normalizeOrder(r.order, c.blocks);
+  const st = r.style && typeof r.style === "object" ? r.style : {};
+  c.style = { font: FONTS.includes(st.font) ? st.font : "serif", button: BUTTONS.includes(st.button) ? st.button : "pill", floatLine: st.floatLine === true };
+  const so = r.seo && typeof r.seo === "object" ? r.seo : {};
+  c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
   return c;
 }
 function normalizePalette(p) {
@@ -276,6 +316,31 @@ function normalizeSections(s) {
     if (typeof r[k] === "boolean") o[k] = r[k];
   });
   return o;
+}
+function normalizeOrder(raw, blocks) {
+  const valid = /* @__PURE__ */ new Set([...ORDER_KEYS.filter((k) => k !== "blocks"), ...(blocks || []).map((b) => "b:" + b.id)]);
+  const out = [];
+  arr(raw).forEach((k) => {
+    if (typeof k === "string" && valid.has(k) && !out.includes(k)) out.push(k);
+  });
+  const defaults = [];
+  ORDER_KEYS.forEach((k) => {
+    if (k === "blocks") (blocks || []).forEach((b) => defaults.push("b:" + b.id));
+    else defaults.push(k);
+  });
+  defaults.forEach((k, i) => {
+    if (out.includes(k)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const p = out.indexOf(defaults[j]);
+      if (p >= 0) {
+        at = p + 1;
+        break;
+      }
+    }
+    out.splice(at, 0, k);
+  });
+  return out;
 }
 
 // templates/shared/hours.js
@@ -506,6 +571,13 @@ function validateForPublish(content, sections, slug, raw, { checkBrand = false, 
     if (it.name && !it.price) add("shop." + i, "線上購買第 " + (i + 1) + " 項（" + it.name + "）缺少價格");
     else if (!it.name && (it.price || it.desc || it.photo)) add("shop." + i, "線上購買第 " + (i + 1) + " 項缺少商品名稱");
   });
+  const rawBlocks = Array.isArray(raw && raw.blocks) ? raw.blocks : [];
+  content.blocks.forEach((b2, i) => {
+    const rawUrl2 = String((rawBlocks.find((r) => r && String(r.id || "").toLowerCase() === b2.id) || {}).btnUrl || "").trim();
+    if (rawUrl2 && !safeHttpsUrl(rawUrl2)) add("blocks." + i, "自訂區塊「" + (b2.title || i + 1) + "」的按鈕連結必須是 https:// 開頭的有效網址");
+    else if (b2.btnLabel && !b2.btnUrl || !b2.btnLabel && b2.btnUrl) add("blocks." + i, "自訂區塊「" + (b2.title || i + 1) + "」的按鈕要同時填文字與連結，或兩者都留空");
+  });
+  if (content.style.floatLine && !content.social.line) add("social.line", "要顯示 LINE 浮動按鈕，請先填 LINE 連結");
   if (content.showMap && !content.address) add("address", "要顯示地圖，請先填店家地址");
   if (template !== void 0 && !getIndustry(template)) add("template", "不支援的行業類型，請重新選擇");
   const se = slugError(slug, { allowBrand: !checkBrand });

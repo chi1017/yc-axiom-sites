@@ -10,8 +10,18 @@ export const LIMITS = {
   reviews: 6, reviewName: 20, reviewText: 200,
   posts: 12, postTitle: 60, postBody: 3000,
   enName: 60, enTagline: 100, enIntro: 1000, enAddress: 160,
-  shopItems: 24, shopName: 40, shopDesc: 200, shopPrice: 200000, shopNote: 300, deposit: 100000
+  shopItems: 24, shopName: 40, shopDesc: 200, shopPrice: 200000, shopNote: 300, deposit: 100000,
+  blocks: 6, blockTitle: 40, blockBody: 1500, btnLabel: 16, seoTitle: 60, seoDesc: 160
 };
+// 首頁區塊（可調整順序）。主視覺固定在最上面；自訂區塊的 key 是 'b:<代碼>'
+export const ORDER_KEYS = ['about', 'video', 'menu', 'interior', 'shop', 'reviews', 'news', 'posts', 'faq', 'blocks', 'booking', 'visit', 'contact'];
+export const ORDER_LABELS = { about: '關於我們', video: '影片', menu: '價目', interior: '環境照片', shop: '線上購買', reviews: '客人評價', news: '最新消息', posts: '文章', faq: '常見問題', booking: '線上預約', visit: '來店資訊', contact: '聯絡表單' };
+export const BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
+// 標題字型：serif＝明體（預設）、sans＝黑體、round＝圓體（jf open 粉圓）、kai＝楷體（霞鶩文楷）
+export const FONTS = ['serif', 'sans', 'round', 'kai'];
+export const FONT_LABELS = { serif: '明體（典雅）', sans: '黑體（俐落）', round: '圓體（親切）', kai: '楷體（手寫感）' };
+export const BUTTONS = ['pill', 'round', 'square'];
+export const BUTTON_LABELS = { pill: '膠囊', round: '圓角', square: '方角' };
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
 export const HERO_STYLES = ['card', 'full'];
@@ -46,7 +56,11 @@ export function emptyContent() {
     en: { enabled: false, name: '', tagline: '', intro: '', address: '' },   // 英文版頁面 /en/
     // 線上購買：店家用自己的綠界帳號收款（金鑰在會員專區設定，不放在內容裡）
     shop: { enabled: false, items: [], note: '' },   // items: [{ id, name, price, desc, photo }]
-    bookingDeposit: 0            // 線上預約要先付的訂金（0＝不收）
+    bookingDeposit: 0,           // 線上預約要先付的訂金（0＝不收）
+    order: [],                   // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
+    blocks: [],                  // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
+    style: { font: 'serif', button: 'pill', floatLine: false },   // 標題字型、按鈕形狀、LINE 浮動按鈕
+    seo: { title: '', description: '', share: null }              // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
 }
 
@@ -182,6 +196,20 @@ export function normalizeContent(raw) {
     })
   };
   c.bookingDeposit = intIn(r.bookingDeposit, 0, LIMITS.deposit) || 0;
+  const bids = new Set();
+  c.blocks = arr(r.blocks).slice(0, LIMITS.blocks).map((x) => {
+    const o = x && typeof x === 'object' ? x : {};
+    let id = String(o.id || '').toLowerCase();
+    if (!BLOCK_ID_RE.test(id) || bids.has(id)) id = '';
+    if (id) bids.add(id);
+    return { id, title: line(o.title, LIMITS.blockTitle), body: str(o.body, LIMITS.blockBody), photo: photo(o.photo),
+      btnLabel: line(o.btnLabel, LIMITS.btnLabel), btnUrl: clip(safeHttpsUrl(o.btnUrl), 500), side: o.side === 'left' ? 'left' : 'right', hidden: o.hidden === true };
+  }).filter((b) => b.id);
+  c.order = normalizeOrder(r.order, c.blocks);
+  const st = r.style && typeof r.style === 'object' ? r.style : {};
+  c.style = { font: FONTS.includes(st.font) ? st.font : 'serif', button: BUTTONS.includes(st.button) ? st.button : 'pill', floatLine: st.floatLine === true };
+  const so = r.seo && typeof r.seo === 'object' ? r.seo : {};
+  c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
   return c;
 }
 
@@ -199,6 +227,24 @@ export const liveFaq = (c) => c.faq.filter((f) => f.q && f.a);
 export const liveNews = (c) => c.news.filter((n) => n.title);
 export const liveReviews = (c) => c.reviews.filter((r) => r.text);
 // 上線的文章：有代碼、標題、內容；依日期新到舊
+// 區塊順序：保留有效、不重複的 key；缺的依預設順序補回（自訂區塊預設放在常見問題之後）
+export function normalizeOrder(raw, blocks) {
+  const valid = new Set([...ORDER_KEYS.filter((k) => k !== 'blocks'), ...(blocks || []).map((b) => 'b:' + b.id)]);
+  const out = [];
+  arr(raw).forEach((k) => { if (typeof k === 'string' && valid.has(k) && !out.includes(k)) out.push(k); });
+  const defaults = [];
+  ORDER_KEYS.forEach((k) => { if (k === 'blocks') (blocks || []).forEach((b) => defaults.push('b:' + b.id)); else defaults.push(k); });
+  defaults.forEach((k, i) => {
+    if (out.includes(k)) return;
+    // 放在預設順序中「前一個已存在的 key」後面
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) { const p = out.indexOf(defaults[j]); if (p >= 0) { at = p + 1; break; } }
+    out.splice(at, 0, k);
+  });
+  return out;
+}
+export const liveBlocks = (c) => c.blocks.filter((b) => !b.hidden && (b.title || b.body || b.photo));
+
 // 上線的商品：有代碼、名稱、價格
 export const liveItems = (c) => c.shop.items.filter((i) => i.id && i.name && i.price);
 export const livePosts = (c) => c.posts.filter((p) => p.id && p.title && p.body).sort((a, b) => (b.date || '').localeCompare(a.date || ''));

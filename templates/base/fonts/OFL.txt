@@ -1,3 +1,10 @@
+Heading fonts (all SIL Open Font License 1.1; each file is a common-character subset):
+- NotoSerifTC-Bold-common.woff2: Noto Serif CJK TC Bold (Google / Adobe Source Han Serif)
+- NotoSansTC-Bold-common.woff2: Noto Sans TC Bold (Google / Adobe Source Han Sans)
+- Huninn-common.woff2: jf open 粉圓 (justfont), from Google Fonts "Huninn"
+- LXGWWenKaiTC-Bold-common.woff2: LXGW WenKai TC Bold (LXGW), from Google Fonts
+Customer sites receive a further subset containing only the characters used in their headings.
+
 Noto Serif CJK TC - Copyright 2010-2012 Google Corporation (Adobe Source Han Serif).
 templates/base/fonts/NotoSerifTC-Bold-common.woff2 is a subset (common Traditional Chinese characters) of Noto Serif CJK TC Bold.
 Customer sites receive a further subset containing only the characters used in their headings.

@@ -1,5 +1,5 @@
 // 瀏覽器預覽與 Node 建置共用的入口：同一份內容 → 同一份 HTML。
-import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews, livePosts, liveItems } from './content.js';
+import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews, livePosts, liveItems, liveBlocks } from './content.js';
 import { clip } from './escape.js';
 import { getPalette } from './palettes.js';
 import { getTemplate } from './registry.js';
@@ -31,12 +31,15 @@ export function imagePlan(content) {
   if (content.photos.hero) add('hero', content.photos.hero);
   content.photos.room.forEach((p, i) => add('room-' + (i + 1), p));
   if (content.shop.enabled) liveItems(content).forEach((it) => { if (it.photo) add('item-' + it.id, it.photo); });
+  liveBlocks(content).forEach((b) => { if (b.photo) add('blk-' + b.id, b.photo); });
+  if (content.seo.share) add('share', content.seo.share);
   return out;
 }
 
 /**
  * input: { template, content, palette, sections, layout?, pages?, page?, siteUrl, preview?, imageSrc?(role, photo, plannedFile), lastmod?, headingFont?, siteId?, publicApi? }
  *  - siteId／publicApi：聯絡表單送出與瀏覽計數用（publicApi＝Edge Function site-public 的網址）
+ *  - previewFontUrl：預覽用的完整標題字型檔網址（編輯器傳入；正式建置用 headingFont 子集）
  *  - payReady：店家已在會員專區設定綠界收款（線上購買與預約訂金才會開放付款）
  *  - imageVariants：true 時圖片加上 srcset（呼叫端要另外寫入 images/<role>-800.webp）
  *  - headingFont：true 時 CSS 加上標題網頁字型（呼叫端要另外寫入 fonts/heading.woff2）
@@ -78,6 +81,8 @@ export function buildSite(input) {
     address: parseAddress(content.address),
     images: plan.map((p) => p.file),
     heroFile: fileOf.hero || '',
+    shareFile: fileOf.share || fileOf.hero || '',   // 分享到 LINE／FB 的圖片（自訂分享圖，沒有就用主視覺）
+    previewFontUrl: preview ? (input.previewFontUrl || '') : '',
     pageLinks: pageList.map((p) => ({ label: p.label, path: p.path }))
   };
   // srcset：原圖寬度大於小圖才提供；寬度不明時當作 1600（編輯器上傳上限）
@@ -107,8 +112,9 @@ export function buildSite(input) {
       pageUrl: absUrl(siteUrl, pg.path),
       // FAQPage：一頁版在首頁；多頁版在常見問題頁（全部）與首頁（前幾題，與畫面上顯示的一致）
       faqOnPage: multi ? (pg.key === 'faq' ? true : pg.key === 'home' ? 'teaser' : false) : true,
-      title: multi ? pageTitle(content, tpl, pg) : buildTitle(content, tpl),
-      description: multi ? pageDescription(content, tpl, pg) : buildDescription(content, tpl),
+      // 首頁可用店家自訂的標題與描述（空的＝自動產生）
+      title: pg.key === 'home' && content.seo.title ? content.seo.title : multi ? pageTitle(content, tpl, pg) : buildTitle(content, tpl),
+      description: pg.key === 'home' && content.seo.description ? content.seo.description : multi ? pageDescription(content, tpl, pg) : buildDescription(content, tpl),
       lead: multi ? pageLead(content, tpl, pg) : '',
       ...(extra.model || {})
     };

@@ -108,7 +108,7 @@ test('member-site: other members, logged-out users, drafts and unknown actions a
 // ── 版型：表單、評價、影片、地圖、統計 ──
 import { readFileSync } from 'node:fs';
 import { buildSite } from '../templates/shared/site.js';
-import { normalizeContent, youtubeId } from '../templates/shared/content.js';
+import { normalizeContent, normalizeSections, youtubeId } from '../templates/shared/content.js';
 import { validateForPublish } from '../templates/shared/validate.js';
 const sample = JSON.parse(readFileSync(new URL('../templates/cafe/sample.json', import.meta.url)));
 const extras = { contactForm: true, showMap: true, video: 'https://youtu.be/dQw4w9WgXcQ', reviews: [{ name: '林小姐', text: '很好喝' }, { name: '', text: '' }], ga4: 'g-abc1234' };
@@ -248,4 +248,39 @@ test('shop: single page has the order form only when payment is set up; multi pa
   assert.match(multi.files['sitemap.xml'], /shop\//);
   const none = buildSite({ ...base, content: { ...content, shop: { ...content.shop, enabled: false } }, payReady: true });
   assert.ok(!none.html.includes('id="shop"'));
+});
+
+// ── 區塊順序、自訂區塊、字型與按鈕、LINE 浮動按鈕、SEO 與分享圖 ──
+test('order: home sections follow the saved order; custom blocks render with photo side and button', () => {
+  const content = { name: '小日子', intro: '我們是一家咖啡店，提供手沖咖啡與手作甜點，歡迎來坐坐。', address: '高雄市苓雅區四維三路100號', contactForm: true, menu: [{ name: '拿鐵', price: 120 }],
+    photos: { hero: { path: 'a/hero.webp', w: 1600, h: 900 } },
+    blocks: [{ id: 'blk1', title: '包場服務', body: '平日晚上可包場。', photo: { path: 'a/b.webp', w: 800, h: 600 }, side: 'left', btnLabel: '詢問包場', btnUrl: 'https://line.me/R/ti/p/@x' }, { id: 'blk2', title: '藏起來', hidden: true }],
+    order: ['contact', 'b:blk1', 'menu', 'about'] };
+  const r = buildSite({ template: 'cafe', content, siteUrl: 'https://x.pages.dev/' });
+  const pos = (id) => r.html.indexOf('id="' + id + '"');
+  assert.ok(pos('contact') > 0 && pos('contact') < pos('b-blk1') && pos('b-blk1') < pos('menu') && pos('menu') < pos('about'));
+  assert.ok(pos('visit') > 0, 'sections missing from the saved order are added back');
+  assert.match(r.html, /class="about split block img-left[^"]*" id="b-blk1"/); assert.match(r.html, /images\/blk-blk1\.webp/);
+  assert.match(r.html, /<a class="btn" href="https:\/\/line\.me\/R\/ti\/p\/@x"[^>]*>詢問包場<\/a>/);
+  assert.ok(!r.html.includes('b-blk2'), 'hidden blocks are not published');
+  const v = validateForPublish(normalizeContent({ ...content, blocks: [{ id: 'blk1', title: 'x', btnLabel: '按我' }] }), normalizeSections({}), 'shop', {}, {});
+  assert.ok(v.errors.some((e) => e.field === 'blocks.0'));
+});
+
+test('style: heading font stack and button shape; LINE float button needs a LINE link; SEO override and share image', () => {
+  const base = { name: '小日子', address: '高雄市苓雅區四維三路100號', photos: { hero: { path: 'a/hero.webp' } }, social: { line: 'https://line.me/R/ti/p/@abc' } };
+  const r = buildSite({ template: 'cafe', content: { ...base, style: { font: 'round', button: 'square', floatLine: true },
+    seo: { title: '小日子咖啡｜高雄手沖', description: '高雄苓雅的手沖咖啡店。', share: { path: 'a/share.jpg' } } }, siteUrl: 'https://x.pages.dev/', preview: false, headingFont: true });
+  assert.match(r.html, /h1,h2,h3\{font-family:"SiteHeading","jf-openhuninn-2\.0"/);
+  assert.match(r.html, /\.btn\{border-radius:2px\}/); assert.match(r.html, /font-weight:100 900/);
+  assert.match(r.html, /<a class="float-line" href="https:\/\/line\.me\/R\/ti\/p\/@abc"/);
+  assert.match(r.html, /<title>小日子咖啡｜高雄手沖<\/title>/); assert.match(r.html, /<meta name="description" content="高雄苓雅的手沖咖啡店。">/);
+  assert.match(r.html, /og:image" content="https:\/\/x\.pages\.dev\/images\/share\.jpg"/);
+  const plain = buildSite({ template: 'cafe', content: base, siteUrl: 'https://x.pages.dev/' });
+  assert.ok(!plain.html.includes('float-line"'), 'off by default'); assert.match(plain.html, /og:image" content="https:\/\/x\.pages\.dev\/images\/hero\.webp"/);
+  assert.match(plain.html, /"Noto Serif TC"/);
+  const prev = buildSite({ template: 'cafe', content: { ...base, style: { font: 'kai' } }, siteUrl: 'https://x.pages.dev/', preview: true, previewFontUrl: 'https://t/fonts/kai.woff2', imageSrc: () => '' });
+  assert.match(prev.html, /src:url\(https:\/\/t\/fonts\/kai\.woff2\)/);
+  const v = validateForPublish(normalizeContent({ ...base, social: {}, style: { floatLine: true } }), normalizeSections({}), 'shop', {}, {});
+  assert.ok(v.errors.some((e) => e.field === 'social.line'));
 });

@@ -1,14 +1,24 @@
 // 版型固定由 YC 設計；客戶只能換配色（CSS 變數）與主視覺樣式。
 // headingFont：建置時有產生 fonts/heading.woff2（只含標題用到的字）才加 @font-face；預覽與舊網站用系統字
-export function baseCss(c, { headingFont = false } = {}) {
-  return (headingFont ? '@font-face{font-family:"SiteHeading";src:url(/fonts/heading.woff2) format("woff2");font-weight:700;font-style:normal;font-display:swap}\n' : '') + `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
+// font：標題字型（serif／sans／round／kai）；button：按鈕形狀（pill／round／square）；fontUrl：預覽時直接載入完整字型檔
+export const FONT_STACKS = {
+  serif: '"Noto Serif TC","Songti TC","PMingLiU",Georgia,serif',
+  sans: '"Noto Sans TC","PingFang TC","Microsoft JhengHei","Segoe UI",sans-serif',
+  round: '"jf-openhuninn-2.0","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif',
+  kai: '"LXGW WenKai TC","Kaiti TC","BiauKai","DFKai-SB",serif'
+};
+const RADIUS = { pill: '999px', round: '10px', square: '2px' };
+export function baseCss(c, { headingFont = false, font = 'serif', button = 'pill', fontUrl = '' } = {}) {
+  const src = headingFont ? '/fonts/heading.woff2' : fontUrl;
+  const stack = FONT_STACKS[font] || FONT_STACKS.serif;
+  return (src ? '@font-face{font-family:"SiteHeading";src:url(' + src + ') format("woff2");font-weight:100 900;font-style:normal;font-display:swap}\n' : '') + `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:16px/1.8 -apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC","Microsoft JhengHei","Segoe UI",sans-serif}
 img{max-width:100%;height:auto;display:block}
 main{flex:1 0 auto}
 a{color:var(--accent)}
-h1,h2,h3{font-family:"SiteHeading","Noto Serif TC","Songti TC","PMingLiU",Georgia,serif;line-height:1.25;margin:0}
+h1,h2,h3{font-family:"SiteHeading",${stack};line-height:1.25;margin:0}
 .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
 .sr{position:absolute;left:-9999px}
 .skip{position:absolute;left:-999px;top:0;background:var(--accent);color:var(--on-accent);padding:8px 14px;z-index:20}
@@ -207,5 +217,12 @@ h2.big{font-size:clamp(34px,5.2vw,60px);margin-bottom:24px;letter-spacing:.01em}
 .strip figure:hover img{transform:scale(1.03)}
 .js-rv .rv{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+
+.btn{border-radius:${RADIUS[button] || RADIUS.pill}}
+.float-line{position:fixed;right:16px;bottom:16px;z-index:45;display:flex;align-items:center;gap:6px;padding:12px 18px;border-radius:999px;background:#05873C;color:#fff;font-weight:700;text-decoration:none;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+.float-line.up{bottom:84px}
+.float-line:hover{filter:brightness(1.05)}
+@media(min-width:760px){.img-left .split-grid{grid-template-columns:1fr 1.1fr}.img-left .split-grid>figure{order:-1}}
+@media print{.float-line,.cart-bar{display:none!important}}
 `;
 }

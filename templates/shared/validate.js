@@ -68,6 +68,13 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
     if (it.name && !it.price) add('shop.' + i, '線上購買第 ' + (i + 1) + ' 項（' + it.name + '）缺少價格');
     else if (!it.name && (it.price || it.desc || it.photo)) add('shop.' + i, '線上購買第 ' + (i + 1) + ' 項缺少商品名稱');
   });
+  const rawBlocks = Array.isArray(raw && raw.blocks) ? raw.blocks : [];
+  content.blocks.forEach((b, i) => {
+    const rawUrl2 = String((rawBlocks.find((r) => r && String(r.id || '').toLowerCase() === b.id) || {}).btnUrl || '').trim();
+    if (rawUrl2 && !safeHttpsUrl(rawUrl2)) add('blocks.' + i, '自訂區塊「' + (b.title || i + 1) + '」的按鈕連結必須是 https:// 開頭的有效網址');
+    else if ((b.btnLabel && !b.btnUrl) || (!b.btnLabel && b.btnUrl)) add('blocks.' + i, '自訂區塊「' + (b.title || i + 1) + '」的按鈕要同時填文字與連結，或兩者都留空');
+  });
+  if (content.style.floatLine && !content.social.line) add('social.line', '要顯示 LINE 浮動按鈕，請先填 LINE 連結');
   if (content.showMap && !content.address) add('address', '要顯示地圖，請先填店家地址');
   if (template !== undefined && !getIndustry(template)) add('template', '不支援的行業類型，請重新選擇');
   const se = slugError(slug, { allowBrand: !checkBrand });

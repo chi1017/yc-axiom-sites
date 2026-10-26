@@ -73,7 +73,7 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     let built = buildSite({ ...buildArgs, headingFont: true });
     // 標題字型：只含標題用到的字；產生失敗就改用系統字重建（不讓字型問題擋住部署）
     let fontBuf = null;
-    try { fontBuf = await buildHeadingFont(built.files); } catch (e) { log('標題字型產生失敗，改用系統字：' + e.message); }
+    try { fontBuf = await buildHeadingFont(built.files, content.style.font); } catch (e) { log('標題字型產生失敗，改用系統字：' + e.message); }
     if (!fontBuf) built = buildSite(buildArgs);
     rmSync(outDir, { recursive: true, force: true });
     mkdirSync(outDir, { recursive: true });

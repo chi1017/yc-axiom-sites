@@ -4,7 +4,9 @@
 import { readFileSync } from 'node:fs';
 import subsetFont from 'subset-font';
 
-const SRC = new URL('../../templates/base/fonts/NotoSerifTC-Bold-common.woff2', import.meta.url);
+// 依店家選的標題字型（content.style.font）挑來源檔；都是常用字子集、SIL OFL
+export const FONT_FILES = { serif: 'NotoSerifTC-Bold-common.woff2', sans: 'NotoSansTC-Bold-common.woff2', round: 'Huninn-common.woff2', kai: 'LXGWWenKaiTC-Bold-common.woff2' };
+const srcOf = (font) => new URL('../../templates/base/fonts/' + (FONT_FILES[font] || FONT_FILES.serif), import.meta.url);
 export const HEADING_FONT_FILE = 'fonts/heading.woff2';
 
 const decode = (s) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
@@ -21,8 +23,8 @@ export function headingText(files) {
   return [...chars].sort().join('');
 }
 
-export async function buildHeadingFont(files) {
+export async function buildHeadingFont(files, font = 'serif') {
   const text = headingText(files);
   if (!text) return null;
-  return subsetFont(readFileSync(SRC), text, { targetFormat: 'woff2' });
+  return subsetFont(readFileSync(srcOf(font)), text, { targetFormat: 'woff2' });
 }
