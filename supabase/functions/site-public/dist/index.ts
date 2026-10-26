@@ -75,8 +75,18 @@ var LIMITS = {
   shopDesc: 200,
   shopPrice: 2e5,
   shopNote: 300,
-  deposit: 1e5
+  deposit: 1e5,
+  blocks: 6,
+  blockTitle: 40,
+  blockBody: 1500,
+  btnLabel: 16,
+  seoTitle: 60,
+  seoDesc: 160
 };
+var ORDER_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "blocks", "booking", "visit", "contact"];
+var BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
+var FONTS = ["serif", "sans", "round", "kai"];
+var BUTTONS = ["pill", "round", "square"];
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var HERO_STYLES = ["card", "full"];
 var HOME_STYLES = ["standard", "magazine"];
@@ -124,8 +134,16 @@ function emptyContent() {
     // 線上購買：店家用自己的綠界帳號收款（金鑰在會員專區設定，不放在內容裡）
     shop: { enabled: false, items: [], note: "" },
     // items: [{ id, name, price, desc, photo }]
-    bookingDeposit: 0
+    bookingDeposit: 0,
     // 線上預約要先付的訂金（0＝不收）
+    order: [],
+    // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
+    blocks: [],
+    // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
+    style: { font: "serif", button: "pill", floatLine: false },
+    // 標題字型、按鈕形狀、LINE 浮動按鈕
+    seo: { title: "", description: "", share: null }
+    // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
 }
 function youtubeId(url) {
@@ -255,7 +273,54 @@ function normalizeContent(raw) {
     })
   };
   c.bookingDeposit = intIn(r.bookingDeposit, 0, LIMITS.deposit) || 0;
+  const bids = /* @__PURE__ */ new Set();
+  c.blocks = arr(r.blocks).slice(0, LIMITS.blocks).map((x) => {
+    const o = x && typeof x === "object" ? x : {};
+    let id = String(o.id || "").toLowerCase();
+    if (!BLOCK_ID_RE.test(id) || bids.has(id)) id = "";
+    if (id) bids.add(id);
+    return {
+      id,
+      title: line(o.title, LIMITS.blockTitle),
+      body: str(o.body, LIMITS.blockBody),
+      photo: photo(o.photo),
+      btnLabel: line(o.btnLabel, LIMITS.btnLabel),
+      btnUrl: clip(safeHttpsUrl(o.btnUrl), 500),
+      side: o.side === "left" ? "left" : "right",
+      hidden: o.hidden === true
+    };
+  }).filter((b2) => b2.id);
+  c.order = normalizeOrder(r.order, c.blocks);
+  const st = r.style && typeof r.style === "object" ? r.style : {};
+  c.style = { font: FONTS.includes(st.font) ? st.font : "serif", button: BUTTONS.includes(st.button) ? st.button : "pill", floatLine: st.floatLine === true };
+  const so = r.seo && typeof r.seo === "object" ? r.seo : {};
+  c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
   return c;
+}
+function normalizeOrder(raw, blocks) {
+  const valid = /* @__PURE__ */ new Set([...ORDER_KEYS.filter((k) => k !== "blocks"), ...(blocks || []).map((b) => "b:" + b.id)]);
+  const out = [];
+  arr(raw).forEach((k) => {
+    if (typeof k === "string" && valid.has(k) && !out.includes(k)) out.push(k);
+  });
+  const defaults = [];
+  ORDER_KEYS.forEach((k) => {
+    if (k === "blocks") (blocks || []).forEach((b) => defaults.push("b:" + b.id));
+    else defaults.push(k);
+  });
+  defaults.forEach((k, i) => {
+    if (out.includes(k)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const p = out.indexOf(defaults[j]);
+      if (p >= 0) {
+        at = p + 1;
+        break;
+      }
+    }
+    out.splice(at, 0, k);
+  });
+  return out;
 }
 var liveItems = (c) => c.shop.items.filter((i) => i.id && i.name && i.price);
 

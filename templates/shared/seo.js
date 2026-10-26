@@ -162,7 +162,8 @@ export const FAVICON = (color) => 'data:image/svg+xml,' + encodeURIComponent(
 export function buildHead(model) {
   const { content: c, tpl, siteUrl, colors } = model;
   const title = model.title, desc = model.description;
-  const hero = model.heroFile ? absUrl(siteUrl, model.heroFile) : '';
+  const shareFile = model.shareFile || model.heroFile;
+  const hero = shareFile ? absUrl(siteUrl, shareFile) : '';
   const url = model.pageUrl || siteUrl;
   // 店家資料每頁都放（同一個 @id），搜尋與 AI 從任何一頁進來都能對應到同一家店
   const lds = [buildBusinessLd(model), buildFaqLd(model), buildBreadcrumbLd(model), ...(model.extraLd || [])].filter(Boolean);

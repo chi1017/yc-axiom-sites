@@ -1,6 +1,6 @@
 import { esc, paragraphs, safeHttpsUrl, telHref, jsonForScript } from '../shared/escape.js';
 import { buildHead, buildBusinessLd, absUrl, FAVICON } from '../shared/seo.js';
-import { liveMenu, liveFaq, liveNews, liveReviews, livePosts, liveItems, youtubeId } from '../shared/content.js';
+import { liveMenu, liveFaq, liveNews, liveReviews, livePosts, liveItems, liveBlocks, youtubeId } from '../shared/content.js';
 import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
 import { pagesFor } from '../shared/pages.js';
 import { baseCss } from './styles.js';
@@ -24,6 +24,7 @@ function ctx(m) {
     bookUrl: safeHttpsUrl(c.booking.url),
     menu: liveMenu(c), faq: liveFaq(c), news: liveNews(c), reviews: liveReviews(c), posts: livePosts(c),
     items: c.shop.enabled ? liveItems(c) : [],
+    blocks: preview ? c.blocks.filter((b) => !b.hidden) : liveBlocks(c),
     mapUrl: c.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) : '',
     plainAddr: region ? m.address.region + m.address.street : c.address,   // 內文敘述不帶郵遞區號
     on: (key) => m.pageList.some((p) => p.key === key)
@@ -387,6 +388,7 @@ function magazineMain(x, multi) {
   blocks.push(infoBand(x));
   if (s.interior) blocks.push(photoStrip(x, rooms.slice(3), 4));
   blocks.push(shopSec(x, multi ? 'teaser' : 'section'));
+  x.blocks.forEach((b) => blocks.push(blockSec(x, b)));
   if (multi) {
     if (x.on('news') && s.news) blocks.push(newsSec(x, 'teaser'));
     blocks.push(postsSec(x, 'teaser'));
@@ -398,26 +400,43 @@ function magazineMain(x, multi) {
   return blocks;
 }
 
-// 一頁版：全部區塊在首頁
+// 自訂圖文區塊：標題、文字、照片（左或右）、按鈕
+function blockSec(x, b) {
+  const paras = paragraphs(b.body);
+  const body = (b.title ? '<h2>' + esc(b.title) + '</h2>' : (x.preview ? '<h2>' + x.ph('區塊標題') + '</h2>' : '')) +
+    (paras.length ? paras.map((t) => '<p>' + esc(t) + '</p>').join('') : (x.preview && !b.title ? '<p>' + x.ph('區塊內容') + '</p>' : '')) +
+    (b.btnLabel && b.btnUrl ? '<p><a class="btn" href="' + esc(b.btnUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(b.btnLabel) + '</a></p>' : '');
+  const id = 'b-' + b.id;
+  if (!b.photo) return '<section class="about block" id="' + id + '"><div class="wrap">' + body + '</div></section>';
+  return '<section class="about split block' + (b.side === 'left' ? ' img-left' : '') + '" id="' + id + '"><div class="wrap split-grid"><div>' + body + '</div><figure>' +
+    img(x, 'blk-' + b.id, b.photo, b.title || x.nm) + '</figure></div></section>';
+}
+// 依店家設定的順序排列首頁區塊（key → 產生 HTML 的函式）
+function ordered(x, parts) {
+  const byId = Object.fromEntries(x.blocks.map((b) => [b.id, b]));
+  return x.c.order.map((k) => (k.startsWith('b:') ? (byId[k.slice(2)] ? blockSec(x, byId[k.slice(2)]) : '') : (parts[k] ? parts[k]() : '')));
+}
+
+// 一頁版：全部區塊在首頁（順序可在編輯器調整）
 function singleMain(x) {
   const s = x.m.show;
-  return [heroSec(x), aboutSec(x, 'section'), videoSec(x), s.menu ? menuSec(x, 'section') : '', s.interior ? interiorSec(x, 'section') : '',
-    shopSec(x, 'section'), reviewsSec(x), s.news ? newsSec(x, 'section') : '', postsSec(x, 'teaser'), s.faq ? faqSec(x, 'section') : '', bookingSec(x), visitSec(x, 'section'), contactSec(x, 'section')];
+  return [heroSec(x), ...ordered(x, {
+    about: () => aboutSec(x, 'section'), video: () => videoSec(x), menu: () => (s.menu ? menuSec(x, 'section') : ''), interior: () => (s.interior ? interiorSec(x, 'section') : ''),
+    shop: () => shopSec(x, 'section'), reviews: () => reviewsSec(x), news: () => (s.news ? newsSec(x, 'section') : ''), posts: () => postsSec(x, 'teaser'),
+    faq: () => (s.faq ? faqSec(x, 'section') : ''), booking: () => bookingSec(x), visit: () => visitSec(x, 'section'), contact: () => contactSec(x, 'section')
+  })];
 }
 
 // 多頁版首頁：主視覺 + 各頁摘要（頁面有開才放）；來店資訊頁沒開時把完整資訊放首頁
 function multiHomeMain(x) {
   const s = x.m.show;
-  return [heroSec(x), aboutSec(x, 'teaser'), videoSec(x),
-    x.on('menu') && s.menu ? menuSec(x, 'teaser') : '',
-    x.on('interior') && s.interior ? interiorSec(x, 'teaser') : '',
-    shopSec(x, 'teaser'),
-    reviewsSec(x),
-    x.on('news') && s.news ? newsSec(x, 'teaser') : '',
-    postsSec(x, 'teaser'),
-    x.on('faq') && s.faq ? faqSec(x, 'teaser') : '',
-    x.on('visit') ? visitSec(x, 'teaser') : visitSec(x, 'section'),
-    x.on('visit') ? '' : bookingSec(x), x.on('visit') ? '' : contactSec(x, 'section')];
+  return [heroSec(x), ...ordered(x, {
+    about: () => aboutSec(x, 'teaser'), video: () => videoSec(x),
+    menu: () => (x.on('menu') && s.menu ? menuSec(x, 'teaser') : ''), interior: () => (x.on('interior') && s.interior ? interiorSec(x, 'teaser') : ''),
+    shop: () => shopSec(x, 'teaser'), reviews: () => reviewsSec(x), news: () => (x.on('news') && s.news ? newsSec(x, 'teaser') : ''), posts: () => postsSec(x, 'teaser'),
+    faq: () => (x.on('faq') && s.faq ? faqSec(x, 'teaser') : ''), visit: () => (x.on('visit') ? visitSec(x, 'teaser') : visitSec(x, 'section')),
+    booking: () => (x.on('visit') ? '' : bookingSec(x)), contact: () => (x.on('visit') ? '' : contactSec(x, 'section'))
+  })];
 }
 
 function multiPageMain(x, key) {
@@ -491,12 +510,12 @@ function render(m) {
   const footNav = multi ? '<nav class="foot-nav" aria-label="頁尾選單"><a href="' + esc(m.href('home')) + '">首頁</a>' + navItems.map((i) => '<a href="' + esc(i[2]) + '">' + i[1] + '</a>').join('') + '</nav>' : '';
   const enLink = c.en.enabled && c.en.name && c.en.intro && m.enHref ? '<a class="lang-link" href="' + esc(m.enHref) + '" hreflang="en" lang="en">English</a>' : '';
   const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + (enLink ? '　' + enLink : '') + '</span>' + footNav + '</div></footer>';
-  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body>\n' +
     '<a class="skip" href="#main">跳到主要內容</a>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : (anchor || '#top')) + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
     '<nav id="site-nav" aria-label="頁面選單">' + nav + '</nav></div></header>\n' +
-    '<main id="main">\n' + body + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + (body.includes('id="order"') ? SHOP_SCRIPT + '\n' : '') + trackers(m) + '</body>\n</html>\n';
+    '<main id="main">\n' + body + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + (body.includes('id="order"') ? SHOP_SCRIPT + '\n' : '') + floatLine(m, body) + trackers(m) + '</body>\n</html>\n';
 }
 
 // 404 頁：不存在的網址回傳真正的 404（避免「軟 404」被當成重複首頁收錄）。
@@ -507,7 +526,7 @@ function renderNotFound(m) {
   const links = [['/', '回首頁'], ...m.pageList.filter((p) => p.key !== 'home').map((p) => ['/' + p.path, p.label])];
   return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     '<title>找不到這個頁面' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
-    '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
+    '<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
     '<main id="main"><section class="page-head"><div class="wrap"><p class="kicker">404</p><h1>找不到這個頁面</h1>' +
     '<p class="lead">網址可能打錯了，或這個頁面已經不存在。</p><p class="more">' +
@@ -553,7 +572,7 @@ function renderEn(m) {
     '<link rel="alternate" hreflang="zh-Hant" href="' + esc(zh) + '">', '<link rel="alternate" hreflang="en" href="' + esc(url) + '">', '<link rel="alternate" hreflang="x-default" href="' + esc(zh) + '">',
     '<link rel="icon" href="' + FAVICON(m.colors.accent) + '">', '<meta property="og:type" content="website">', '<meta name="twitter:card" content="' + (m.heroFile ? 'summary_large_image' : 'summary') + '">', '<meta property="og:title" content="' + esc(title) + '">', '<meta property="og:description" content="' + esc(desc) + '">', '<meta property="og:url" content="' + esc(url) + '">', '<meta property="og:locale" content="en_US">',
     (m.heroFile ? '<meta property="og:image" content="' + esc(absUrl(m.siteUrl, m.heroFile)) + '">' : ''), '<script type="application/ld+json">' + jsonForScript(ld) + '</script>'].filter(Boolean).join('\n');
-  return '<!doctype html>\n<html lang="en">\n<head>\n' + head + '\n<style>' + baseCss(m.colors, { headingFont: false }) + '</style>\n</head>\n<body>\n' +
+  return '<!doctype html>\n<html lang="en">\n<head>\n' + head + '\n<style>' + baseCss(m.colors, { ...cssOpts(m), headingFont: false }) + '</style>\n</head>\n<body>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="./">' + name + '</a><nav aria-label="Menu"><a href="#about">About</a>' + (x.menu.length && m.show.menu ? '<a href="#menu">' + esc(offer.split(' &')[0]) + '</a>' : '') + '<a href="#visit">Visit</a><a href="../" hreflang="zh-Hant" lang="zh-Hant">中文</a></nav></div></header>\n' +
     '<main id="main">\n' + sections.filter(Boolean).join('\n') + '\n</main>\n' +
     '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span><nav class="foot-nav"><a href="../" lang="zh-Hant">中文網站</a></nav></div></footer>\n' + trackers(m) + '</body>\n</html>\n';
@@ -565,7 +584,7 @@ function renderThanks(m) {
   const name = c.name ? esc(c.name) : '';
   return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     '<title>已收到你的留言' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
-    '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
+    '<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
     '<main id="main"><section class="page-head"><div class="wrap"><h1>已經收到了，謝謝</h1>' +
     '<p class="lead">我們會盡快用你留下的聯絡方式回覆你。如果是預約申請，要等我們確認後才算預約成功。</p><p class="more"><a href="/">回首頁</a></p></div></section></main>\n' +
@@ -578,11 +597,23 @@ function renderOrderDone(m) {
   const name = c.name ? esc(c.name) : '';
   return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     '<title>謝謝你的訂購' + (name ? '｜' + name : '') + '</title>\n<meta name="robots" content="noindex">\n' +
-    '<style>' + baseCss(m.colors, { headingFont: m.headingFont }) + '</style>\n</head>\n<body>\n' +
+    '<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="/">' + name + '</a></div></header>\n' +
     '<main id="main"><section class="page-head"><div class="wrap"><h1>謝謝你，訂單已送出</h1>' +
     '<p class="lead">付款成功後，你會收到確認信，我們也會收到通知並盡快處理。如果選擇 ATM 或超商付款，請在期限內完成繳費。沒有收到確認信，請直接與我們聯絡。</p><p class="more"><a href="/">回首頁</a></p></div></section></main>\n' +
     '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + name + '</span></div></footer>\n</body>\n</html>\n';
+}
+
+// 標題字型、按鈕形狀（預覽時 previewFontUrl 指向完整字型檔，正式建置用 fonts/heading.woff2 子集）
+function cssOpts(m) {
+  const st = (m.content && m.content.style) || {};
+  return { headingFont: m.headingFont, font: st.font, button: st.button, fontUrl: m.previewFontUrl || '' };
+}
+// LINE 浮動按鈕（需要先填 LINE 連結）；頁面有購物車列時往上移，避免重疊
+function floatLine(m, body) {
+  const c = m.content;
+  if (!c.style || !c.style.floatLine || !c.social.line) return '';
+  return '<a class="float-line' + (body.includes('id="order"') ? ' up' : '') + '" href="' + esc(c.social.line) + '" target="_blank" rel="noopener noreferrer" aria-label="用 LINE 聯絡我們">LINE 聯絡</a>\n';
 }
 
 // 依行業設定產生版型物件：版面與流程全行業共用，只有用詞與 schema.org 類型不同
