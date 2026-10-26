@@ -50,11 +50,12 @@ export function newTradeNo(now = new Date()) {
 export async function checkoutFields(order, cfg) {
   const f = {
     MerchantID: cfg.merchantId, MerchantTradeNo: order.tradeNo, MerchantTradeDate: ecpayDate(order.now || new Date()),
-    PaymentType: 'aio', TotalAmount: String(order.amount), TradeDesc: '網站租用', ItemName: order.itemName,
-    ReturnURL: order.returnUrl, ChoosePayment: order.kind === 'atm' ? 'ATM' : 'Credit', EncryptType: '1'
+    PaymentType: 'aio', TotalAmount: String(order.amount), TradeDesc: order.desc || '網站租用', ItemName: order.itemName,
+    ReturnURL: order.returnUrl, ChoosePayment: order.choose || (order.kind === 'atm' ? 'ATM' : 'Credit'), EncryptType: '1'
   };
   if (order.clientBackUrl) f.ClientBackURL = order.clientBackUrl;
   if (order.custom1) f.CustomField1 = order.custom1;
+  if (order.choose === 'ALL' && order.paymentInfoUrl) f.PaymentInfoURL = order.paymentInfoUrl;
   if (order.kind === 'atm') { f.ExpireDate = '3'; if (order.paymentInfoUrl) f.PaymentInfoURL = order.paymentInfoUrl; }
   if (order.kind === 'card_monthly') {
     // 定期定額：每月扣一次，最多 99 次；TotalAmount 必須等於 PeriodAmount

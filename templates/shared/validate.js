@@ -64,6 +64,10 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
     if (p.title && !p.date) add('posts.' + i, '文章第 ' + (i + 1) + ' 篇缺少日期');
   });
   if (content.en.enabled && (!content.en.name || !content.en.intro)) add('en', '英文版要填英文店名與英文介紹（或先關閉英文版）');
+  if (content.shop.enabled) content.shop.items.forEach((it, i) => {
+    if (it.name && !it.price) add('shop.' + i, '線上購買第 ' + (i + 1) + ' 項（' + it.name + '）缺少價格');
+    else if (!it.name && (it.price || it.desc || it.photo)) add('shop.' + i, '線上購買第 ' + (i + 1) + ' 項缺少商品名稱');
+  });
   if (content.showMap && !content.address) add('address', '要顯示地圖，請先填店家地址');
   if (template !== undefined && !getIndustry(template)) add('template', '不支援的行業類型，請重新選擇');
   const se = slugError(slug, { allowBrand: !checkBrand });

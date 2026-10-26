@@ -228,3 +228,24 @@ test('english page: /en/ with hreflang both ways, English hours and LD, sitemap,
   const v = validateForPublish(normalizeContent({ ...sample.content, en: { enabled: true } }), sample.sections, 'shop-a');
   assert.ok(v.errors.some((e) => e.field === 'en'));
 });
+
+// ── 線上購買（店家自己的綠界）──
+test('shop: single page has the order form only when payment is set up; multi page gets shop/; prices come from content', () => {
+  const content = { name: '小日子', intro: '我們是一家咖啡店，提供手沖咖啡與手作甜點，歡迎來坐坐。', photos: { hero: { path: 'a/hero-1.webp', w: 1600, h: 900 } }, bookingForm: true, bookingDeposit: 300,
+    shop: { enabled: true, note: '週一至週五出貨', items: [{ id: 'abcd', name: '餅乾禮盒', price: 480, desc: '十二入', photo: { path: 'a/item-1.webp', w: 800, h: 600 } }, { id: 'efgh', name: '咖啡豆', price: 350 }, { id: 'zzzz', name: '', price: 1 }] } };
+  const base = { template: 'cafe', content, siteUrl: 'https://x.pages.dev/', siteId: '11111111-1111-1111-1111-111111111111', publicApi: 'https://p/functions/v1/site-public' };
+  const on = buildSite({ ...base, payReady: true });
+  assert.match(on.html, /<form class="contact-form shop-form" id="order" method="post" action="https:\/\/p\/functions\/v1\/site-public\/shop"/);
+  assert.match(on.html, /name="q_abcd"[^>]*data-price="480"/); assert.ok(!on.html.includes('q_zzzz'), 'items without a name are not sold');
+  assert.match(on.html, /images\/item-abcd\.webp/); assert.ok(on.images.some((i) => i.role === 'item-abcd'));
+  assert.match(on.html, /預約需先付訂金 NT\$ 300/); assert.match(on.html, /href="#shop">線上購買</);
+  assert.ok(on.files['order/index.html']); assert.match(on.files['order/index.html'], /noindex/);
+  const off = buildSite({ ...base, payReady: false });
+  assert.ok(!off.html.includes('id="order"')); assert.match(off.html, /尚未開放線上付款/); assert.ok(!off.html.includes('訂金'));
+  const multi = buildSite({ ...base, layout: 'multi', pages: {}, payReady: true });
+  assert.match(multi.files['index.html'], /前往線上購買/); assert.ok(!multi.files['index.html'].includes('id="order"'));
+  assert.match(multi.files['shop/index.html'], /id="order"/); assert.match(multi.files['shop/index.html'], /\.\.\/images\/item-abcd/);
+  assert.match(multi.files['sitemap.xml'], /shop\//);
+  const none = buildSite({ ...base, content: { ...content, shop: { ...content.shop, enabled: false } }, payReady: true });
+  assert.ok(!none.html.includes('id="shop"'));
+});

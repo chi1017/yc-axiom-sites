@@ -9,7 +9,8 @@ export const LIMITS = {
   room: 6, alt: 60, social: 200,
   reviews: 6, reviewName: 20, reviewText: 200,
   posts: 12, postTitle: 60, postBody: 3000,
-  enName: 60, enTagline: 100, enIntro: 1000, enAddress: 160
+  enName: 60, enTagline: 100, enIntro: 1000, enAddress: 160,
+  shopItems: 24, shopName: 40, shopDesc: 200, shopPrice: 200000, shopNote: 300, deposit: 100000
 };
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
@@ -42,7 +43,10 @@ export function emptyContent() {
     ga4: '',                     // Google Analytics 4 評估 ID（G-XXXXXXX），選填
     posts: [],                   // 文章 [{ id, title, date, body }]：每篇一個網頁 posts/<id>/
     bookingForm: false,          // 線上預約表單（客人送出預約申請，店家收到通知後再確認）
-    en: { enabled: false, name: '', tagline: '', intro: '', address: '' }   // 英文版頁面 /en/
+    en: { enabled: false, name: '', tagline: '', intro: '', address: '' },   // 英文版頁面 /en/
+    // 線上購買：店家用自己的綠界帳號收款（金鑰在會員專區設定，不放在內容裡）
+    shop: { enabled: false, items: [], note: '' },   // items: [{ id, name, price, desc, photo }]
+    bookingDeposit: 0            // 線上預約要先付的訂金（0＝不收）
   };
 }
 
@@ -55,6 +59,8 @@ export function youtubeId(url) {
 export const GA4_RE = /^G-[A-Z0-9]{4,15}$/;
 // 文章網址代碼（posts/<id>/）：建立時由編輯器產生，之後不變
 export const POST_ID_RE = /^[a-z0-9][a-z0-9-]{4,38}[a-z0-9]$/;
+// 商品代碼：建立時由編輯器產生，之後不變（結帳時用代碼對價格，不相信瀏覽器送來的金額）
+export const ITEM_ID_RE = /^[a-z0-9]{4,12}$/;
 export function defaultSections() { return { menu: true, interior: true, faq: true, news: true }; }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -70,6 +76,12 @@ const str = (v, n) => clip(String(v == null ? '' : v).replace(/\r\n?/g, '\n').re
 const line = (v, n) => str(v, n).replace(/\s*\n\s*/g, ' ');
 const arr = (v) => (Array.isArray(v) ? v : []);
 
+function intIn(v, min, max) {
+  let n = typeof v === 'string' ? v.replace(/[,\s$NT元]/gi, '') : v;
+  if (n === '' || n == null) return null;
+  n = Math.round(Number(n));
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
 function photo(p) {
   if (!p || typeof p !== 'object') return null;
   const path = String(p.path || '').trim();
@@ -156,6 +168,20 @@ export function normalizeContent(raw) {
   });
   const ga = String(r.ga4 || '').trim().toUpperCase();
   c.ga4 = GA4_RE.test(ga) ? ga : '';
+  const sh = r.shop && typeof r.shop === 'object' ? r.shop : {};
+  const ids = new Set();
+  c.shop = {
+    enabled: sh.enabled === true,
+    note: str(sh.note, LIMITS.shopNote),
+    items: arr(sh.items).slice(0, LIMITS.shopItems).map((x) => {
+      const o = x && typeof x === 'object' ? x : {};
+      let id = String(o.id || '').toLowerCase();
+      if (!ITEM_ID_RE.test(id) || ids.has(id)) id = '';
+      if (id) ids.add(id);
+      return { id, name: line(o.name, LIMITS.shopName), price: intIn(o.price, 1, LIMITS.shopPrice), desc: str(o.desc, LIMITS.shopDesc), photo: photo(o.photo) };
+    })
+  };
+  c.bookingDeposit = intIn(r.bookingDeposit, 0, LIMITS.deposit) || 0;
   return c;
 }
 
@@ -173,4 +199,6 @@ export const liveFaq = (c) => c.faq.filter((f) => f.q && f.a);
 export const liveNews = (c) => c.news.filter((n) => n.title);
 export const liveReviews = (c) => c.reviews.filter((r) => r.text);
 // 上線的文章：有代碼、標題、內容；依日期新到舊
+// 上線的商品：有代碼、名稱、價格
+export const liveItems = (c) => c.shop.items.filter((i) => i.id && i.name && i.price);
 export const livePosts = (c) => c.posts.filter((p) => p.id && p.title && p.body).sort((a, b) => (b.date || '').localeCompare(a.date || ''));

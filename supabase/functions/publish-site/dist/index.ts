@@ -73,7 +73,13 @@ var LIMITS = {
   enName: 60,
   enTagline: 100,
   enIntro: 1e3,
-  enAddress: 160
+  enAddress: 160,
+  shopItems: 24,
+  shopName: 40,
+  shopDesc: 200,
+  shopPrice: 2e5,
+  shopNote: 300,
+  deposit: 1e5
 };
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
@@ -119,8 +125,13 @@ function emptyContent() {
     // 文章 [{ id, title, date, body }]：每篇一個網頁 posts/<id>/
     bookingForm: false,
     // 線上預約表單（客人送出預約申請，店家收到通知後再確認）
-    en: { enabled: false, name: "", tagline: "", intro: "", address: "" }
+    en: { enabled: false, name: "", tagline: "", intro: "", address: "" },
     // 英文版頁面 /en/
+    // 線上購買：店家用自己的綠界帳號收款（金鑰在會員專區設定，不放在內容裡）
+    shop: { enabled: false, items: [], note: "" },
+    // items: [{ id, name, price, desc, photo }]
+    bookingDeposit: 0
+    // 線上預約要先付的訂金（0＝不收）
   };
 }
 function youtubeId(url) {
@@ -130,6 +141,7 @@ function youtubeId(url) {
 }
 var GA4_RE = /^G-[A-Z0-9]{4,15}$/;
 var POST_ID_RE = /^[a-z0-9][a-z0-9-]{4,38}[a-z0-9]$/;
+var ITEM_ID_RE = /^[a-z0-9]{4,12}$/;
 function defaultSections() {
   return { menu: true, interior: true, faq: true, news: true };
 }
@@ -146,6 +158,12 @@ function validDate(d) {
 var str = (v, n) => clip(String(v == null ? "" : v).replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim(), n);
 var line = (v, n) => str(v, n).replace(/\s*\n\s*/g, " ");
 var arr = (v) => Array.isArray(v) ? v : [];
+function intIn(v, min, max) {
+  let n = typeof v === "string" ? v.replace(/[,\s$NT元]/gi, "") : v;
+  if (n === "" || n == null) return null;
+  n = Math.round(Number(n));
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
 function photo(p) {
   if (!p || typeof p !== "object") return null;
   const path = String(p.path || "").trim();
@@ -232,6 +250,20 @@ function normalizeContent(raw) {
   });
   const ga = String(r.ga4 || "").trim().toUpperCase();
   c.ga4 = GA4_RE.test(ga) ? ga : "";
+  const sh = r.shop && typeof r.shop === "object" ? r.shop : {};
+  const ids = /* @__PURE__ */ new Set();
+  c.shop = {
+    enabled: sh.enabled === true,
+    note: str(sh.note, LIMITS.shopNote),
+    items: arr(sh.items).slice(0, LIMITS.shopItems).map((x) => {
+      const o = x && typeof x === "object" ? x : {};
+      let id = String(o.id || "").toLowerCase();
+      if (!ITEM_ID_RE.test(id) || ids.has(id)) id = "";
+      if (id) ids.add(id);
+      return { id, name: line(o.name, LIMITS.shopName), price: intIn(o.price, 1, LIMITS.shopPrice), desc: str(o.desc, LIMITS.shopDesc), photo: photo(o.photo) };
+    })
+  };
+  c.bookingDeposit = intIn(r.bookingDeposit, 0, LIMITS.deposit) || 0;
   return c;
 }
 function normalizePalette(p) {
@@ -470,6 +502,10 @@ function validateForPublish(content, sections, slug, raw, { checkBrand = false, 
     if (p.title && !p.date) add("posts." + i, "文章第 " + (i + 1) + " 篇缺少日期");
   });
   if (content.en.enabled && (!content.en.name || !content.en.intro)) add("en", "英文版要填英文店名與英文介紹（或先關閉英文版）");
+  if (content.shop.enabled) content.shop.items.forEach((it, i) => {
+    if (it.name && !it.price) add("shop." + i, "線上購買第 " + (i + 1) + " 項（" + it.name + "）缺少價格");
+    else if (!it.name && (it.price || it.desc || it.photo)) add("shop." + i, "線上購買第 " + (i + 1) + " 項缺少商品名稱");
+  });
   if (content.showMap && !content.address) add("address", "要顯示地圖，請先填店家地址");
   if (template !== void 0 && !getIndustry(template)) add("template", "不支援的行業類型，請重新選擇");
   const se = slugError(slug, { allowBrand: !checkBrand });

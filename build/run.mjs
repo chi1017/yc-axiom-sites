@@ -66,7 +66,10 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     let variants = true;
     try { for (const img of images) img.variantBufs = await Promise.all(img.variants.map((v) => makeSmall(img.buf, v.w))); } catch (e) { variants = false; log('手機小圖產生失敗，改用原圖：' + e.message); }
 
-    const buildArgs = { template: site.template, content, palette, sections, layout, pages, siteUrl, imageVariants: variants, lastmod: now().toISOString().slice(0, 10), siteId: site.id, publicApi };
+    // 店家已設定綠界收款 → 網站的線上購買、預約訂金才開放付款
+    const pay = await db.getOne('site_pay_settings', 'site_id=eq.' + encodeURIComponent(siteId) + '&select=mode').catch(() => null);
+    const payReady = !!(pay && pay.mode && pay.mode !== 'off');
+    const buildArgs = { template: site.template, content, palette, sections, layout, pages, siteUrl, imageVariants: variants, lastmod: now().toISOString().slice(0, 10), siteId: site.id, publicApi, payReady };
     let built = buildSite({ ...buildArgs, headingFont: true });
     // 標題字型：只含標題用到的字；產生失敗就改用系統字重建（不讓字型問題擋住部署）
     let fontBuf = null;
