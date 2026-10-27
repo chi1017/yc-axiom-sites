@@ -47,6 +47,17 @@ function isCustomPalette(id) {
 function isValidPaletteId(id) {
   return PALETTE_IDS.includes(id) || isCustomPalette(id);
 }
+var HEX_RE = /^#[0-9A-F]{6}$/;
+function normalizeColors4(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const o = {};
+  for (const k of ["bg", "surface", "accent", "text"]) {
+    const v = String(raw[k] || "").toUpperCase();
+    if (!HEX_RE.test(v)) return null;
+    o[k] = v;
+  }
+  return o;
+}
 
 // templates/shared/content.js
 var LIMITS = {
@@ -158,7 +169,7 @@ function emptyContent() {
     // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
     blocks: [],
     // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards" },
+    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards", colors: null },
     subs: {},
     // 各區塊標題下方的一句副標題（選填）
     seo: { title: "", description: "", share: null }
@@ -324,7 +335,8 @@ function normalizeContent(raw) {
     head: pick(HEAD_STYLES, st.head),
     menuStyle: pick(MENU_STYLES, st.menuStyle),
     gallery: pick(GALLERY_STYLES, st.gallery),
-    reviewStyle: pick(REVIEW_STYLES, st.reviewStyle)
+    reviewStyle: pick(REVIEW_STYLES, st.reviewStyle),
+    colors: normalizeColors4(st.colors)
   };
   const sb = r.subs && typeof r.subs === "object" ? r.subs : {};
   c.subs = {};
