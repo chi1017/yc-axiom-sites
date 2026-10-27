@@ -136,3 +136,14 @@ test('runBuild: custom code only goes live on the pro tier after approval; custo
   const b = await run('pro', 'pending'); assert.doesNotMatch(b.html, /yc-code/); assert.match(b.ev.detail.skipped, /等待審核/);
   const c = await run('basic', 'approved'); assert.doesNotMatch(c.html, /yc-code/);
 });
+
+test('runBuild: an upgrade waiting for payment still deploys the one-page site', async () => {
+  const db = fakeDb({ siteLayout: 'multi', verLayout: 'multi', verPages: { about: true, menu: true, interior: true, news: true, faq: true, visit: true } });
+  const g = db.getOne; db.getOne = async (t, q) => (t === 'rental_sites' ? { ...(await g(t, q)), upgrade_pending: true } : g(t, q));
+  const out = join(mkdtempSync(join(tmpdir(), 'u-')), 'dist');
+  await runBuild({ siteId: SID, outDir: out, db, cf: fakeCf(), deploy: async () => {}, log: () => {} });
+  assert.ok(existsSync(join(out, 'index.html'))); assert.ok(!existsSync(join(out, 'about/index.html')));
+  db.getOne = g; const out2 = join(mkdtempSync(join(tmpdir(), 'u-')), 'dist');
+  await runBuild({ siteId: SID, outDir: out2, db, cf: fakeCf(), deploy: async () => {}, log: () => {} });
+  assert.ok(existsSync(join(out2, 'about/index.html')));
+});

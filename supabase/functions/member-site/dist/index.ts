@@ -149,6 +149,20 @@ var PALETTES = {
 };
 var PALETTE_IDS = Object.keys(PALETTES);
 
+// templates/shared/content.js
+var SECTION_KEYS = ["menu", "interior", "faq", "news"];
+function defaultSections() {
+  return { menu: true, interior: true, faq: true, news: true };
+}
+function normalizeSections(s) {
+  const o = defaultSections();
+  const r = s && typeof s === "object" ? s : {};
+  SECTION_KEYS.forEach((k) => {
+    if (typeof r[k] === "boolean") o[k] = r[k];
+  });
+  return o;
+}
+
 // supabase/functions/_shared/shop.mjs
 var MERCHANT_RE = /^\d{7,10}$/;
 var KEY_RE = /^[A-Za-z0-9]{16}$/;
@@ -179,9 +193,146 @@ function collabInvite({ shopName, inviter, dashboardUrl }) {
   const text = [(inviter || "網站擁有者") + " 邀請你一起編輯「" + shopName + "」的網站。", "請用這個 Email 登入 YC AXIOM 會員專區，登入後就會看到這個網站。", dashboardUrl].filter(Boolean).join("\n");
   return { subject, html, text };
 }
+function adminUpgradeRequest({ shopName, slug, memberEmail, amount, days, yearly, adminUrl }) {
+  const subject = "【網站租用】升級多頁版，待補差額 NT$ " + Number(amount).toLocaleString("en-US") + "：" + shopName;
+  const html = layout(
+    "客戶申請升級成多頁版",
+    "<p>「" + esc(shopName) + "」（" + esc(slug) + "，" + esc(memberEmail) + "）申請把網站升級成多頁版。</p><p>剩餘 " + esc(days) + " 天，" + (yearly ? "年繳" : "月繳") + "，差額 <b>NT$ " + esc(Number(amount).toLocaleString("en-US")) + "</b>。</p><p>收到客戶匯款後，到管理後台的網站詳情按「確認收到升級差額」，系統會自動發佈多頁版。在那之前正式網站維持一頁版。</p>" + (adminUrl ? button(adminUrl, "開啟管理後台") : "")
+  );
+  const text = ["客戶申請升級成多頁版", "", shopName + "（" + slug + "，" + memberEmail + "）", "剩餘 " + days + " 天，" + (yearly ? "年繳" : "月繳") + "，差額 NT$ " + amount, "", "收到匯款後到管理後台按「確認收到升級差額」，系統會自動發佈多頁版。"].join("\n");
+  return { subject, html, text };
+}
+
+// supabase/functions/_shared/plans.mjs
+var PLANS = {
+  single: { name: "自架版（一頁）", monthly: 599, yearPaidMonths: 10 },
+  multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
+};
+function upgradeQuote({ paidUntil, today, yearly = false }) {
+  if (!paidUntil || paidUntil < today) return { days: 0, amount: 0, yearly };
+  const days = Math.round((Date.parse(paidUntil + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) + 1;
+  const perDay = yearly ? (PLANS.multi.monthly - PLANS.single.monthly) * PLANS.single.yearPaidMonths / 365 : (PLANS.multi.monthly - PLANS.single.monthly) / 30;
+  return { days, amount: Math.round(days * perDay), yearly };
+}
+
+// templates/shared/industries.js
+var OFFERS = {
+  menu: { label: "菜單與價格", nav: "菜單", path: "menu/", item: "品項", provide: "店內提供", note: "價格以現場公告為準。", more: "看完整菜單" },
+  service: { label: "服務與價格", nav: "服務項目", path: "services/", item: "服務", provide: "提供", note: "實際價格依現場評估為準。", more: "看所有服務" },
+  course: { label: "課程與費用", nav: "課程", path: "courses/", item: "課程", provide: "開設", note: "費用以最新公告為準。", more: "看所有課程" },
+  product: { label: "商品與價格", nav: "商品", path: "products/", item: "商品", provide: "販售", note: "價格以門市公告為準。", more: "看更多商品" },
+  treatment: { label: "診療項目", nav: "診療項目", path: "treatments/", item: "項目", provide: "提供", note: "費用依實際診療內容為準。", more: "看所有診療項目" },
+  room: { label: "房型與價格", nav: "房型", path: "rooms/", item: "房型", provide: "提供", note: "房價依日期與方案調整，以訂房時為準。", more: "看所有房型" }
+};
+var SPACES = {
+  store: { label: "店內環境", path: "space/", more: "看更多照片" },
+  space: { label: "環境介紹", path: "space/", more: "看更多照片" },
+  classroom: { label: "教室環境", path: "space/", more: "看更多照片" },
+  clinic: { label: "診所環境", path: "space/", more: "看更多照片" },
+  school: { label: "園所環境", path: "space/", more: "看更多照片" },
+  lodging: { label: "空間介紹", path: "space/", more: "看更多照片" },
+  portfolio: { label: "作品集", path: "works/", more: "看更多作品" }
+};
+var VISITS = {
+  store: { label: "來店資訊", path: "visit/", intro: "來店", ask: "如果想先確認座位或詢問細節" },
+  clinic: { label: "看診資訊", path: "visit/", intro: "看診", ask: "如果想先確認看診時間或預約" },
+  school: { label: "交通與聯絡", path: "visit/", intro: "參觀", ask: "如果想預約參觀或詢問課程" },
+  contact: { label: "聯絡我們", path: "contact/", intro: "洽詢", ask: "如果想詢問報價或預約時間" },
+  lodging: { label: "交通與入住", path: "visit/", intro: "入住", ask: "如果想詢問空房或交通方式" }
+};
+var ROWS = [
+  ["cafe", "咖啡店", "餐飲", "CafeOrCoffeeShop", "menu", "store", "store"],
+  ["bakery", "烘焙坊", "餐飲", "Bakery", "menu", "store", "store"],
+  ["drink", "飲料店", "餐飲", "FoodEstablishment", "menu", "store", "store"],
+  ["dessert", "甜點店", "餐飲", "FoodEstablishment", "menu", "store", "store"],
+  ["restaurant", "餐廳", "餐飲", "Restaurant", "menu", "store", "store"],
+  ["brunch", "早午餐店", "餐飲", "Restaurant", "menu", "store", "store"],
+  ["bar", "酒吧", "餐飲", "BarOrPub", "menu", "store", "store"],
+  ["tea", "茶館", "餐飲", "FoodEstablishment", "menu", "store", "store"],
+  ["salon", "美髮沙龍", "美業", "HairSalon", "service", "store", "store"],
+  ["beauty", "美容美體", "美業", "BeautySalon", "service", "store", "store"],
+  ["nail", "美甲美睫", "美業", "NailSalon", "service", "store", "store"],
+  ["spa", "按摩 SPA", "美業", "DaySpa", "service", "store", "store"],
+  ["pet", "寵物美容", "美業", "PetStore", "service", "store", "store"],
+  ["gym", "健身房", "運動與健康", "ExerciseGym", "course", "space", "store"],
+  ["yoga", "瑜珈教室", "運動與健康", "SportsActivityLocation", "course", "classroom", "school"],
+  ["medical", "診所", "運動與健康", "MedicalClinic", "treatment", "clinic", "clinic"],
+  ["dental", "牙醫診所", "運動與健康", "Dentist", "treatment", "clinic", "clinic"],
+  ["tcm", "中醫診所", "運動與健康", "MedicalClinic", "treatment", "clinic", "clinic"],
+  ["physio", "物理治療所", "運動與健康", "Physiotherapy", "treatment", "clinic", "clinic"],
+  ["vet", "動物醫院", "運動與健康", "VeterinaryCare", "treatment", "clinic", "clinic"],
+  ["edu", "補習班", "教育", "EducationalOrganization", "course", "classroom", "school"],
+  ["arts", "才藝教室", "教育", "EducationalOrganization", "course", "classroom", "school"],
+  ["music", "音樂教室", "教育", "EducationalOrganization", "course", "classroom", "school"],
+  ["kindergarten", "幼兒園", "教育", "Preschool", "course", "school", "school"],
+  ["daycare", "托嬰中心", "教育", "ChildCare", "course", "school", "school"],
+  ["fashion", "服飾店", "零售", "ClothingStore", "product", "store", "store"],
+  ["furniture", "家具店", "零售", "FurnitureStore", "product", "store", "store"],
+  ["florist", "花店", "零售", "Florist", "product", "store", "store"],
+  ["bookstore", "書店", "零售", "BookStore", "product", "store", "store"],
+  ["eyewear", "眼鏡行", "零售", "Optician", "product", "store", "store"],
+  ["gift", "選物店", "零售", "Store", "product", "store", "store"],
+  ["grocery", "雜貨店", "零售", "GroceryStore", "product", "store", "store"],
+  ["car-detailing", "汽車美容", "生活服務", "AutoWash", "service", "store", "store"],
+  ["auto-repair", "汽車維修", "生活服務", "AutoRepair", "service", "store", "store"],
+  ["motorcycle", "機車行", "生活服務", "MotorcycleRepair", "service", "store", "store"],
+  ["laundry", "洗衣店", "生活服務", "DryCleaningOrLaundry", "service", "store", "store"],
+  ["cleaning", "居家清潔", "生活服務", "ProfessionalService", "service", "portfolio", "contact"],
+  ["photo", "攝影工作室", "生活服務", "ProfessionalService", "service", "portfolio", "contact"],
+  ["interior", "室內設計", "生活服務", "HomeAndConstructionBusiness", "service", "portfolio", "contact"],
+  ["renovation", "裝修工程", "生活服務", "GeneralContractor", "service", "portfolio", "contact"],
+  ["lodging", "民宿", "住宿", "BedAndBreakfast", "room", "lodging", "lodging"],
+  ["law", "法律事務所", "專業服務", "LegalService", "service", "space", "contact"],
+  ["accounting", "會計記帳", "專業服務", "AccountingService", "service", "space", "contact"],
+  ["realestate", "房屋仲介", "專業服務", "RealEstateAgent", "service", "space", "contact"],
+  ["other", "其他店家", "其他", "LocalBusiness", "service", "store", "store"]
+];
+var INDUSTRIES = ROWS.map(([key, label, group, schemaType, offer, space, visit]) => ({
+  key,
+  label,
+  group,
+  schemaType,
+  kindLabel: label,
+  offer: OFFERS[offer],
+  space: SPACES[space],
+  visit: VISITS[visit]
+}));
+var INDUSTRY_KEYS = INDUSTRIES.map((i) => i.key);
+var INDUSTRY_GROUPS = [...new Set(INDUSTRIES.map((i) => i.group))];
+var BY_KEY = Object.fromEntries(INDUSTRIES.map((i) => [i.key, i]));
+
+// templates/shared/pages.js
+var PAGES = [
+  { key: "about", label: "關於", path: "about/" },
+  { key: "menu", label: "菜單與價格", path: "menu/" },
+  { key: "interior", label: "店內環境", path: "space/" },
+  { key: "news", label: "最新消息", path: "news/" },
+  { key: "faq", label: "常見問題", path: "faq/" },
+  { key: "visit", label: "來店資訊", path: "visit/" }
+];
+var PAGE_KEYS = PAGES.map((p) => p.key);
+function defaultPages() {
+  const o = {};
+  PAGE_KEYS.forEach((k) => {
+    o[k] = true;
+  });
+  return o;
+}
+function normalizePages(raw) {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const o = defaultPages();
+  PAGE_KEYS.forEach((k) => {
+    if (typeof r[k] === "boolean") o[k] = r[k];
+  });
+  return o;
+}
+function pagesFromSections(sections) {
+  const s = normalizeSections(sections);
+  return { about: true, menu: s.menu, interior: s.interior, news: s.news, faq: s.faq, visit: true };
+}
 
 // supabase/functions/member-site/handler.mjs
-var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site", "set_booking", "invite_collab", "remove_collab", "accept_invites"];
+var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site", "set_booking", "invite_collab", "remove_collab", "accept_invites", "upgrade_quote", "upgrade_layout"];
 var MAX_COLLABS = 5;
 var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 var DELETABLE = ["draft", "pending"];
@@ -218,6 +369,7 @@ async function handleMember(req, deps) {
   if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   if (body.action === "set_booking") return setBooking(body, site, user, deps, reply, fail);
   if (body.action === "invite_collab" || body.action === "remove_collab") return collabAction(body, site, user, deps, reply, fail);
+  if (body.action === "upgrade_quote" || body.action === "upgrade_layout") return upgradeAction(body, site, user, deps, reply, fail);
   if (["get_pay", "set_pay", "order_done"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === "delete_site") {
     if (!DELETABLE.includes(site.status) || site.first_published_at) return fail("not_allowed", "已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止", 409);
@@ -346,6 +498,43 @@ async function acceptInvites(user, deps, reply) {
   for (const x of r) await db2.insert("site_events", { site_id: x.site_id, type: "collab_joined", detail: { email, by: "member:" + email } }).catch(() => {
   });
   return reply({ ok: true, accepted: r.length }, 200);
+}
+var PAID_STATUSES = ["live", "overdue", "suspended"];
+async function quoteFor(site, deps) {
+  const today = new Date((deps.now ? deps.now() : /* @__PURE__ */ new Date()).getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
+  if (!PAID_STATUSES.includes(site.status) || !site.paid_until) return { days: 0, amount: 0, yearly: false };
+  const last = await deps.db.getOne("payments", "site_id=eq." + site.id + "&select=months&order=paid_on.desc");
+  return upgradeQuote({ paidUntil: site.paid_until, today, yearly: !!(last && last.months >= 12) });
+}
+async function upgradeAction(body, site, user, deps, reply, fail) {
+  const { db: db2 } = deps;
+  if (site.layout === "multi") return fail("not_allowed", "這個網站已經是多頁版", 409);
+  if (site.status === "cancelled") return fail("not_allowed", "這個網站已終止服務", 409);
+  const q = await quoteFor(site, deps);
+  if (body.action === "upgrade_quote") return reply({ ok: true, ...q }, 200);
+  const pages = body.pages ? normalizePages(body.pages) : pagesFromSections(normalizeSections(site.sections));
+  const pending = q.amount > 0;
+  const now = (deps.now ? deps.now() : /* @__PURE__ */ new Date()).toISOString();
+  const done = await db2.patchReturning("rental_sites", "id=eq." + site.id + "&layout=eq.single", { layout: "multi", pages, upgrade_pending: pending, upgrade_amount: q.amount, upgrade_requested_at: now });
+  if (!done.length) return fail("not_allowed", "這個網站已經是多頁版", 409);
+  const by = "member:" + (user.email || user.id);
+  await db2.insert("site_events", { site_id: site.id, type: "layout_upgraded", detail: { amount: q.amount, days: q.days, yearly: q.yearly, pending, by } }).catch(() => {
+  });
+  if (pending && deps.sendMail && deps.adminEmail) {
+    await deps.sendMail({ to: deps.adminEmail, ...adminUpgradeRequest({ shopName: site.content && site.content.name || site.slug, slug: site.slug, memberEmail: user.email || "", amount: q.amount, days: q.days, yearly: q.yearly, adminUrl: deps.adminUrl }) }).catch(() => null);
+  }
+  const r = done[0];
+  return reply({
+    ok: true,
+    layout: "multi",
+    pages: r.pages,
+    upgraded_at: r.upgraded_at,
+    upgrade_pending: pending,
+    amount: q.amount,
+    days: q.days,
+    yearly: q.yearly,
+    message: pending ? "已升級成多頁版。請匯款升級差額 NT$ " + q.amount.toLocaleString("en-US") + "，我們確認收到後會自動發佈多頁版；在那之前正式網站維持一頁版。" : "已升級成多頁版，按「發佈」後正式網站就會變成多頁。"
+  }, 200);
 }
 
 // build/lib/supabase.mjs
@@ -543,4 +732,4 @@ var CF_ACCOUNT = Deno.env.get("CLOUDFLARE_ACCOUNT_ID") || "";
 var cf = CF_TOKEN && CF_ACCOUNT ? makeCloudflare({ token: CF_TOKEN, accountId: CF_ACCOUNT }) : void 0;
 var sendMail = makeBrevoSender({ apiKey: Deno.env.get("BREVO_API_KEY") || "" });
 var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
-Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf, sendMail, dashboardUrl: SITE_BASE + "dashboard/", paySecret: Deno.env.get("PAY_SECRET") || SERVICE }));
+Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf, sendMail, dashboardUrl: SITE_BASE + "dashboard/", adminUrl: SITE_BASE + "admin/", adminEmail: Deno.env.get("ADMIN_EMAIL") || "ycaxiom@gmail.com", paySecret: Deno.env.get("PAY_SECRET") || SERVICE }));

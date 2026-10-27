@@ -5,10 +5,13 @@ import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
 import { domainAction } from '../_shared/domain.mjs';
 import { seal } from '../_shared/secretbox.mjs';
 import { MERCHANT_RE, KEY_RE, PAY_MODES } from '../_shared/shop.mjs';
-import { guestBookingResult, collabInvite } from '../_shared/emails.mjs';
+import { guestBookingResult, collabInvite, adminUpgradeRequest } from '../_shared/emails.mjs';
+import { upgradeQuote } from '../_shared/plans.mjs';
+import { normalizePages, pagesFromSections } from '../../../templates/shared/pages.js';
+import { normalizeSections } from '../../../templates/shared/content.js';
 export { parseOrigins };
 
-const ACTIONS = ['set_domain', 'check_domain', 'clear_domain', 'get_pay', 'set_pay', 'order_done', 'delete_site', 'set_booking', 'invite_collab', 'remove_collab', 'accept_invites'];
+const ACTIONS = ['set_domain', 'check_domain', 'clear_domain', 'get_pay', 'set_pay', 'order_done', 'delete_site', 'set_booking', 'invite_collab', 'remove_collab', 'accept_invites', 'upgrade_quote', 'upgrade_layout'];
 export const MAX_COLLABS = 5;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 // 會員可以自己刪除的狀態：還沒上線過的草稿與待上線（沒有部署、沒有收款）。刪除＝改成已終止並隱藏，資料保留，管理員可以復原。
@@ -45,6 +48,7 @@ export async function handleMember(req, deps) {
   if (!site) return reply({ error: 'not_found', message: '找不到這個網站' }, 404);
   if (body.action === 'set_booking') return setBooking(body, site, user, deps, reply, fail);
   if (body.action === 'invite_collab' || body.action === 'remove_collab') return collabAction(body, site, user, deps, reply, fail);
+  if (body.action === 'upgrade_quote' || body.action === 'upgrade_layout') return upgradeAction(body, site, user, deps, reply, fail);
   if (['get_pay', 'set_pay', 'order_done'].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === 'delete_site') {
     if (!DELETABLE.includes(site.status) || site.first_published_at) return fail('not_allowed', '已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止', 409);
@@ -180,4 +184,35 @@ async function acceptInvites(user, deps, reply) {
   const r = await db.patchReturning('site_members', 'email=eq.' + encodeURIComponent(email) + '&status=eq.invited', { status: 'active', member_id: user.id, accepted_at: now });
   for (const x of r) await db.insert('site_events', { site_id: x.site_id, type: 'collab_joined', detail: { email, by: 'member:' + email } }).catch(() => {});
   return reply({ ok: true, accepted: r.length }, 200);
+}
+
+// ── 一頁版升級多頁版 ──
+// 已付費、還有剩餘天數的網站：要補差額。先把網站改成多頁（可以編輯、預覽、發佈成待上線的版本），
+// 管理員確認收到差額後才發佈多頁版；在那之前正式網站維持一頁版。還沒付過費或已到期的網站不用補差額。
+const PAID_STATUSES = ['live', 'overdue', 'suspended'];
+async function quoteFor(site, deps) {
+  const today = new Date((deps.now ? deps.now() : new Date()).getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  if (!PAID_STATUSES.includes(site.status) || !site.paid_until) return { days: 0, amount: 0, yearly: false };
+  const last = await deps.db.getOne('payments', 'site_id=eq.' + site.id + '&select=months&order=paid_on.desc');
+  return upgradeQuote({ paidUntil: site.paid_until, today, yearly: !!(last && last.months >= 12) });
+}
+async function upgradeAction(body, site, user, deps, reply, fail) {
+  const { db } = deps;
+  if (site.layout === 'multi') return fail('not_allowed', '這個網站已經是多頁版', 409);
+  if (site.status === 'cancelled') return fail('not_allowed', '這個網站已終止服務', 409);
+  const q = await quoteFor(site, deps);
+  if (body.action === 'upgrade_quote') return reply({ ok: true, ...q }, 200);
+  const pages = body.pages ? normalizePages(body.pages) : pagesFromSections(normalizeSections(site.sections));
+  const pending = q.amount > 0;
+  const now = (deps.now ? deps.now() : new Date()).toISOString();
+  const done = await db.patchReturning('rental_sites', 'id=eq.' + site.id + '&layout=eq.single', { layout: 'multi', pages, upgrade_pending: pending, upgrade_amount: q.amount, upgrade_requested_at: now });
+  if (!done.length) return fail('not_allowed', '這個網站已經是多頁版', 409);
+  const by = 'member:' + (user.email || user.id);
+  await db.insert('site_events', { site_id: site.id, type: 'layout_upgraded', detail: { amount: q.amount, days: q.days, yearly: q.yearly, pending, by } }).catch(() => {});
+  if (pending && deps.sendMail && deps.adminEmail) {
+    await deps.sendMail({ to: deps.adminEmail, ...adminUpgradeRequest({ shopName: (site.content && site.content.name) || site.slug, slug: site.slug, memberEmail: user.email || '', amount: q.amount, days: q.days, yearly: q.yearly, adminUrl: deps.adminUrl }) }).catch(() => null);
+  }
+  const r = done[0];
+  return reply({ ok: true, layout: 'multi', pages: r.pages, upgraded_at: r.upgraded_at, upgrade_pending: pending, amount: q.amount, days: q.days, yearly: q.yearly,
+    message: pending ? '已升級成多頁版。請匯款升級差額 NT$ ' + q.amount.toLocaleString('en-US') + '，我們確認收到後會自動發佈多頁版；在那之前正式網站維持一頁版。' : '已升級成多頁版，按「發佈」後正式網站就會變成多頁。' }, 200);
 }

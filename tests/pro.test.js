@@ -186,3 +186,33 @@ test('code review: publishing new code asks the admin; approve redeploys and tel
   assert.equal(tr.status, 200); assert.equal(w.t.rental_sites[0].tier, 'basic'); assert.equal(w.log.dispatches.at(-1).versionId, 'v1');
   assert.equal((await w.call(handleAdmin, { action: 'set_tier', site_id: SID, tier: 'gold' }, 'admin')).status, 400);
 });
+
+// ── 一頁升級多頁：補差額 ──
+import { upgradeQuote } from '../supabase/functions/_shared/plans.mjs';
+test('upgrade quote: monthly and yearly prorating, nothing left = nothing to pay', () => {
+  assert.deepEqual(upgradeQuote({ paidUntil: '2026-11-14', today: '2026-10-26', yearly: false }), { days: 20, amount: 200, yearly: false });
+  assert.equal(upgradeQuote({ paidUntil: '2027-08-21', today: '2026-10-26', yearly: true }).amount, Math.round(300 * 3000 / 365));
+  assert.equal(upgradeQuote({ paidUntil: '2026-10-01', today: '2026-10-26' }).amount, 0);
+});
+test('upgrade flow: paid site waits for the difference; publish only saves; admin confirm publishes multi; unpaid site upgrades free', async () => {
+  const w = world({ tier: 'basic', live: { ...base } });
+  Object.assign(w.t.rental_sites[0], { paid_until: '2026-11-14', sections: {} });
+  w.t.payments = [{ site_id: SID, months: 1, paid_on: '2026-10-15' }];
+  const q = await w.call(handleMember, { action: 'upgrade_quote', site_id: SID });
+  assert.equal(q.j.amount, 200);
+  const u = await w.call(handleMember, { action: 'upgrade_layout', site_id: SID });
+  assert.equal(u.status, 200); assert.equal(u.j.upgrade_pending, true);
+  const s = w.t.rental_sites[0];
+  assert.equal(s.layout, 'multi'); assert.equal(s.upgrade_pending, true); assert.equal(s.upgrade_amount, 200);
+  assert.ok(w.log.mails.some((m) => /待補差額 NT\$ 200/.test(m.subject)));
+  assert.equal((await w.call(handleMember, { action: 'upgrade_layout', site_id: SID })).status, 409);
+  const p = await w.call(handlePublish, { site_id: SID });
+  assert.equal(p.j.upgrade_pending, true); assert.equal(w.log.dispatches.length, 0);
+  assert.equal((await w.call(handleAdmin, { action: 'confirm_upgrade', site_id: SID, reference: '12345' }, 'admin')).status, 200);
+  assert.equal(s.upgrade_pending, false); assert.equal(w.log.dispatches.length, 1);
+  assert.ok(w.log.mails.some((m) => m.to === 'o@x.tw' && /已收到升級差額/.test(m.subject)));
+  assert.equal((await w.call(handleAdmin, { action: 'confirm_upgrade', site_id: SID }, 'admin')).status, 409);
+  const d = world({ tier: 'basic', live: { ...base } }); Object.assign(d.t.rental_sites[0], { status: 'pending', paid_until: null, sections: {} }); d.t.payments = [];
+  const u2 = await d.call(handleMember, { action: 'upgrade_layout', site_id: SID });
+  assert.equal(u2.j.upgrade_pending, false); assert.equal(d.t.rental_sites[0].upgrade_pending, false);
+});

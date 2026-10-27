@@ -42,6 +42,22 @@ function customerCodeResult({ shopName, approved, note }) {
   const text = [msg, note ? "說明：" + note : "", approved ? "" : "可以在編輯器修改後重新發佈，我們會再審核一次。"].filter(Boolean).join("\n");
   return { subject, html, text };
 }
+function customerUpgradeDone({ shopName, amount, nextPrice }) {
+  const subject = "【YC AXIOM】已收到升級差額，多頁版上線中：" + shopName;
+  const html = layout(
+    "已收到升級差額",
+    "<p>我們已收到 " + esc(shopName) + " 的升級差額" + (amount ? " NT$ " + esc(Number(amount).toLocaleString("en-US")) : "") + "，多頁版網站正在發佈，約 1–2 分鐘後生效。</p>" + (nextPrice ? "<p>下一期起依多頁版計費：" + esc(nextPrice) + "。</p>" : "") + '<p style="color:#666;font-size:13px">' + esc(ADD_CONTACT) + "</p>"
+  );
+  const text = ["我們已收到 " + shopName + " 的升級差額" + (amount ? " NT$ " + amount : "") + "，多頁版網站正在發佈，約 1–2 分鐘後生效。", nextPrice ? "下一期起依多頁版計費：" + nextPrice + "。" : ""].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
+// supabase/functions/_shared/plans.mjs
+var PLANS = {
+  single: { name: "自架版（一頁）", monthly: 599, yearPaidMonths: 10 },
+  multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
+};
+var planFor = (layout2) => layout2 === "multi" ? PLANS.multi : PLANS.single;
 
 // supabase/functions/_shared/domain.mjs
 function normalizeDomain(v) {
@@ -199,7 +215,7 @@ async function applyPayment({ db: db2, site, siteId, amount, months, method, ref
 // supabase/functions/admin-site/handler.mjs
 var MAX_MONTHS = 60;
 var MAX_AMOUNT = 1e7;
-var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain", "set_tier", "review_code"];
+var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain", "set_tier", "review_code", "confirm_upgrade"];
 var PHOTO_BUCKET = "site-photos";
 function taipeiDate(d) {
   return new Date(d.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
@@ -354,6 +370,24 @@ async function handleAdmin(req, deps) {
       await event("version_restore_queued", { version_id: ver.id, overwrite_draft: overwrite });
       const d = await queueDeploy({ versionId: ver.id });
       return d.ok ? reply({ ok: true, message: "已排入還原" + (overwrite ? "（並已覆蓋會員草稿）" : "（會員草稿未更動）") + "，約 1–2 分鐘。" }, 200) : fail("dispatch_failed", "沒有送出成功：" + deployWarn, 502);
+    }
+    // 確認收到「一頁升級多頁」的差額：解除待補款，發佈最新版本（多頁版），寄信通知客戶
+    case "confirm_upgrade": {
+      if (!site.upgrade_pending) return fail("not_allowed", "這個網站沒有待補差額的升級", 409);
+      const reference = body.reference == null ? "" : String(body.reference).trim();
+      if (reference.length > 100) return fail("bad_request", "匯款備註最長 100 字");
+      const waived = body.waived === true;
+      await db2.patch("rental_sites", "id=eq." + siteId, { upgrade_pending: false });
+      await event("upgrade_paid", { amount: waived ? 0 : site.upgrade_amount || 0, reference, ...waived ? { waived: true } : {} });
+      const member = await db2.getOne("members", "id=eq." + site.member_id + "&select=email");
+      const p = planFor("multi");
+      if (member && member.email && deps.sendMail) await deps.sendMail({ to: member.email, ...customerUpgradeDone({ shopName: site.content && site.content.name || site.slug, amount: waived ? 0 : site.upgrade_amount, nextPrice: "NT$ " + p.monthly + "／月" }) }).catch(() => null);
+      if (["live", "overdue"].includes(site.status)) {
+        const lv = await latestVersion();
+        const d = await queueDeploy({ versionId: lv && lv.id || site.live_version_id });
+        return reply({ ok: true, message: "已確認，多頁版發佈中（約 1–2 分鐘）。", ...d.ok ? {} : { warning: deployWarn } }, 200);
+      }
+      return reply({ ok: true, message: "已確認。網站恢復上線時會使用多頁版。" }, 200);
     }
     // 方案：basic／pro。降回一般方案時，上線中的網站會重新部署（拿掉程式碼與預約行事曆）
     case "set_tier": {
