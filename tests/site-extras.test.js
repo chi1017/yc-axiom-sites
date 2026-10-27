@@ -300,3 +300,8 @@ test('look: subtitles, heading line, texture, motion and section layouts are CSS
   const plain = buildSite({ template: 'cafe', content: { name: 'x' }, siteUrl: 'https://x.pages.dev/' });
   assert.match(plain.html, /<body class="hd-plain mo-rise">/);
 });
+
+test('style.colors overrides the palette with the shop\'s own four colours', () => {
+  const r = buildSite({ template: 'cafe', content: { name: 'x', style: { colors: { bg: '#101820', surface: '#1B2733', accent: '#F2AA4C', text: '#F4F1EA' } } }, palette: 'forest', siteUrl: 'https://x.pages.dev/' });
+  assert.match(r.html, /--bg:#101820;--surface:#1B2733;--text:#F4F1EA;/); assert.match(r.html, /--accent:#F2AA4C/);
+});

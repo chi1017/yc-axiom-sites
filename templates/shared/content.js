@@ -1,6 +1,6 @@
 // 內容 JSON 的上限、預設值與正規化。編輯器、Edge Function、建置腳本共用同一份。
 import { safeHttpsUrl, cleanPhone, clip } from './escape.js';
-import { isValidPaletteId } from './palettes.js';
+import { isValidPaletteId, normalizeColors4 } from './palettes.js';
 
 export const LIMITS = {
   name: 40, tagline: 60, intro: 600, address: 120, phone: 24, hoursNote: 80,
@@ -72,7 +72,7 @@ export function emptyContent() {
     bookingDeposit: 0,           // 線上預約要先付的訂金（0＝不收）
     order: [],                   // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
     blocks: [],                  // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: 'serif', button: 'pill', floatLine: false, texture: 'none', motion: 'rise', head: 'plain', menuStyle: 'list', gallery: 'masonry', reviewStyle: 'cards' },
+    style: { font: 'serif', button: 'pill', floatLine: false, texture: 'none', motion: 'rise', head: 'plain', menuStyle: 'list', gallery: 'masonry', reviewStyle: 'cards', colors: null },
     subs: {},                    // 各區塊標題下方的一句副標題（選填）
     seo: { title: '', description: '', share: null }              // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
@@ -224,7 +224,7 @@ export function normalizeContent(raw) {
   const pick = (list, v) => (list.includes(v) ? v : list[0]);
   c.style = { font: FONTS.includes(st.font) ? st.font : 'serif', button: BUTTONS.includes(st.button) ? st.button : 'pill', floatLine: st.floatLine === true,
     texture: pick(TEXTURES, st.texture), motion: pick(MOTIONS, st.motion), head: pick(HEAD_STYLES, st.head),
-    menuStyle: pick(MENU_STYLES, st.menuStyle), gallery: pick(GALLERY_STYLES, st.gallery), reviewStyle: pick(REVIEW_STYLES, st.reviewStyle) };
+    menuStyle: pick(MENU_STYLES, st.menuStyle), gallery: pick(GALLERY_STYLES, st.gallery), reviewStyle: pick(REVIEW_STYLES, st.reviewStyle), colors: normalizeColors4(st.colors) };
   const sb = r.subs && typeof r.subs === 'object' ? r.subs : {};
   c.subs = {};
   SUB_KEYS.forEach((k) => { const v = line(sb[k], LIMITS.sub); if (v) c.subs[k] = v; });

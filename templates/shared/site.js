@@ -1,7 +1,7 @@
 // 瀏覽器預覽與 Node 建置共用的入口：同一份內容 → 同一份 HTML。
 import { normalizeContent, normalizePalette, normalizeSections, liveMenu, liveFaq, liveNews, livePosts, liveItems, liveBlocks } from './content.js';
 import { clip } from './escape.js';
-import { getPalette } from './palettes.js';
+import { getPalette, paletteFrom4 } from './palettes.js';
 import { getTemplate } from './registry.js';
 import { buildTitle, buildDescription, pageTitle, pageDescription, pageLead, fitDescription, absUrl, robotsTxt, sitemapXml, llmsTxt } from './seo.js';
 import { normalizeLayout, normalizePages, enabledPages } from './pages.js';
@@ -73,7 +73,7 @@ export function buildSite(input) {
   const pageList = enabledPages(layout, pagesOn, input.template).filter((p) => p.key === 'home' || hasContent[p.key]);
   const pathOf = Object.fromEntries(pageList.map((p) => [p.key, p.path]));
   const base = {
-    tpl, content, paletteId, colors: getPalette(paletteId), sections, show, siteUrl, preview, layout, pageList,
+    tpl, content, paletteId, colors: content.style.colors ? paletteFrom4(content.style.colors) : getPalette(paletteId), sections, show, siteUrl, preview, layout, pageList,
     // 聯絡表單與瀏覽計數（正式建置時由 build/run.mjs 傳入；沒有時表單顯示為示範、不送統計）
     siteId: input.siteId || '', bookingAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/booking' : '', formAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/contact' : '', hitUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/hit' : '',
     shopAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/shop' : '', payReady: !!input.payReady,
