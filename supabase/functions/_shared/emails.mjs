@@ -201,6 +201,25 @@ export function adminUpgradeRequest({ shopName, slug, memberEmail, amount, days,
   const text = ['客戶申請升級成多頁版', '', shopName + '（' + slug + '，' + memberEmail + '）', '剩餘 ' + days + ' 天，' + (yearly ? '年繳' : '月繳') + '，差額 NT$ ' + amount, '', '收到匯款後到管理後台按「確認收到升級差額」，系統會自動發佈多頁版。'].join('\n');
   return { subject, html, text };
 }
+// 客戶申請加購進階功能 → 通知管理員
+export function adminProRequest({ shopName, slug, memberEmail, amount, days, yearly, pending, adminUrl }) {
+  const subject = '【網站租用】申請進階功能' + (pending ? '，待補差額 NT$ ' + Number(amount).toLocaleString('en-US') : '（已直接開通）') + '：' + shopName;
+  const html = layout('客戶申請進階功能',
+    '<p>「' + esc(shopName) + '」（' + esc(slug) + '，' + esc(memberEmail) + '）申請加購進階功能。</p>' +
+    (pending ? '<p>剩餘 ' + esc(days) + ' 天，' + (yearly ? '年繳' : '月繳') + '，差額 <b>NT$ ' + esc(Number(amount).toLocaleString('en-US')) + '</b>。收到匯款後到管理後台按「確認收到進階差額」就會開通。</p>' : '<p>這個網站沒有剩餘的已付天數，已直接開通；下一期起依新價格收費。</p>') +
+    (adminUrl ? button(adminUrl, '開啟管理後台') : ''));
+  const text = ['客戶申請進階功能', shopName + '（' + slug + '，' + memberEmail + '）', pending ? '差額 NT$ ' + amount + '（剩 ' + days + ' 天，' + (yearly ? '年繳' : '月繳') + '），收到匯款後到管理後台確認。' : '已直接開通，下一期起依新價格收費。'].join('\n');
+  return { subject, html, text };
+}
+// 進階功能差額確認 → 通知客戶
+export function customerProDone({ shopName, amount }) {
+  const subject = '【YC AXIOM】進階功能已開通：' + shopName;
+  const html = layout('進階功能已開通',
+    '<p>' + (amount ? '我們已收到 ' + esc(shopName) + ' 的進階功能差額 NT$ ' + esc(Number(amount).toLocaleString('en-US')) + '，' : esc(shopName) + ' 的') + '預約行事曆、自訂程式碼與多人協作已經開通。</p>' +
+    '<p>在編輯器設定後按「發佈」就會出現在網站上；自訂程式碼需要我們審核後才會放進網站。</p><p style="color:#666;font-size:13px">' + esc(ADD_CONTACT) + '</p>');
+  const text = [shopName + ' 的進階功能（預約行事曆、自訂程式碼、多人協作）已經開通。', '在編輯器設定後按「發佈」就會出現在網站上；自訂程式碼需要審核後才會放進網站。'].join('\n');
+  return { subject, html, text };
+}
 // 升級差額確認 → 通知客戶
 export function customerUpgradeDone({ shopName, amount, nextPrice }) {
   const subject = '【YC AXIOM】已收到升級差額，多頁版上線中：' + shopName;

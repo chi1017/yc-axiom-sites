@@ -216,3 +216,46 @@ test('upgrade flow: paid site waits for the difference; publish only saves; admi
   const u2 = await d.call(handleMember, { action: 'upgrade_layout', site_id: SID });
   assert.equal(u2.j.upgrade_pending, false); assert.equal(d.t.rental_sites[0].upgrade_pending, false);
 });
+
+// ── 方案：進階加購、下一期降級 ──
+import { proQuote, priceFor, monthlyOf } from '../supabase/functions/_shared/plans.mjs';
+import { renewText } from '../supabase/functions/rental-cron/handler.mjs';
+test('plan prices: pro add-on on either layout, yearly pays 10 months, pro difference prorated', () => {
+  assert.equal(monthlyOf('single', 'pro'), 999); assert.equal(monthlyOf('multi', 'pro'), 1299);
+  assert.equal(priceFor('multi', 12, 'pro'), 12990); assert.equal(priceFor('single', 1), 599);
+  assert.equal(proQuote({ paidUntil: '2026-11-14', today: '2026-10-26' }).amount, Math.round(20 * 400 / 30));
+  assert.match(renewText({ layout: 'multi', tier: 'pro', next_tier: 'basic' }), /NT\$ 899／月/);
+  assert.match(renewText({ layout: 'single', tier: 'pro' }), /NT\$ 999／月.*進階功能/);
+});
+test('pro request: paid site waits for the difference then admin opens it; unpaid site gets it at once', async () => {
+  const w = world({ tier: 'basic', live: { ...base } });
+  Object.assign(w.t.rental_sites[0], { paid_until: '2026-11-14', pro_pending: false }); w.t.payments = [{ site_id: SID, months: 1, paid_on: '2026-10-15' }];
+  assert.equal((await w.call(handleMember, { action: 'pro_quote', site_id: SID })).j.amount, 267);
+  const r = await w.call(handleMember, { action: 'request_pro', site_id: SID });
+  assert.equal(r.j.pending, true); assert.equal(w.t.rental_sites[0].tier, 'basic'); assert.equal(w.t.rental_sites[0].pro_pending, true);
+  assert.ok(w.log.mails.some((m) => /申請進階功能，待補差額 NT\$ 267/.test(m.subject)));
+  assert.equal((await w.call(handleMember, { action: 'request_pro', site_id: SID })).status, 409);
+  assert.equal((await w.call(handleAdmin, { action: 'confirm_pro', site_id: SID }, 'admin')).status, 200);
+  assert.equal(w.t.rental_sites[0].tier, 'pro'); assert.equal(w.t.rental_sites[0].pro_pending, false); assert.equal(w.log.dispatches.length, 1);
+  const d = world({ tier: 'basic', live: { ...base } }); Object.assign(d.t.rental_sites[0], { status: 'pending', paid_until: null, pro_pending: false }); d.t.payments = [];
+  const r2 = await d.call(handleMember, { action: 'request_pro', site_id: SID });
+  assert.equal(r2.j.pending, false); assert.equal(d.t.rental_sites[0].tier, 'pro');
+});
+test('next-period downgrade: requested by the member, applied when the renewal is confirmed, site redeployed as one page without pro', async () => {
+  const w = world({ tier: 'pro', live: { ...base } });
+  Object.assign(w.t.rental_sites[0], { layout: 'multi', pages: { about: true, menu: false, interior: true, news: true, faq: true, visit: true }, sections: { menu: true, interior: true, faq: true, news: true }, paid_until: '2026-11-14' });
+  w.t.payments = [];
+  assert.equal((await w.call(handleMember, { action: 'set_next', site_id: SID, next_layout: 'single', next_tier: 'basic' })).status, 200);
+  assert.equal(w.t.rental_sites[0].next_layout, 'single'); assert.equal(w.t.rental_sites[0].layout, 'multi');
+  assert.equal((await w.call(handleMember, { action: 'set_next', site_id: SID, next_layout: 'multi' })).status, 400);
+  const c = await w.call(handleAdmin, { action: 'confirm_payment', site_id: SID, amount: 599, months: 1, paid_on: '2026-10-26' }, 'admin');
+  assert.equal(c.status, 200);
+  const s = w.t.rental_sites[0];
+  assert.equal(s.layout, 'single'); assert.equal(s.tier, 'basic'); assert.equal(s.next_layout, null); assert.equal(s.next_tier, null); assert.equal(s.sections.menu, false);
+  assert.equal(w.log.dispatches.at(-1).versionId, 'v1'); assert.ok(w.t.site_events.some((e) => e.type === 'plan_downgraded'));
+  // 取消申請
+  const w2 = world({ tier: 'pro', live: { ...base } });
+  await w2.call(handleMember, { action: 'set_next', site_id: SID, next_tier: 'basic' });
+  await w2.call(handleMember, { action: 'set_next', site_id: SID, next_tier: null });
+  assert.equal(w2.t.rental_sites[0].next_tier, null);
+});

@@ -5,13 +5,13 @@ import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
 import { domainAction } from '../_shared/domain.mjs';
 import { seal } from '../_shared/secretbox.mjs';
 import { MERCHANT_RE, KEY_RE, PAY_MODES } from '../_shared/shop.mjs';
-import { guestBookingResult, collabInvite, adminUpgradeRequest } from '../_shared/emails.mjs';
-import { upgradeQuote } from '../_shared/plans.mjs';
+import { guestBookingResult, collabInvite, adminUpgradeRequest, adminProRequest } from '../_shared/emails.mjs';
+import { upgradeQuote, proQuote } from '../_shared/plans.mjs';
 import { normalizePages, pagesFromSections } from '../../../templates/shared/pages.js';
 import { normalizeSections } from '../../../templates/shared/content.js';
 export { parseOrigins };
 
-const ACTIONS = ['set_domain', 'check_domain', 'clear_domain', 'get_pay', 'set_pay', 'order_done', 'delete_site', 'set_booking', 'invite_collab', 'remove_collab', 'accept_invites', 'upgrade_quote', 'upgrade_layout'];
+const ACTIONS = ['set_domain', 'check_domain', 'clear_domain', 'get_pay', 'set_pay', 'order_done', 'delete_site', 'set_booking', 'invite_collab', 'remove_collab', 'accept_invites', 'upgrade_quote', 'upgrade_layout', 'pro_quote', 'request_pro', 'set_next'];
 export const MAX_COLLABS = 5;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 // 會員可以自己刪除的狀態：還沒上線過的草稿與待上線（沒有部署、沒有收款）。刪除＝改成已終止並隱藏，資料保留，管理員可以復原。
@@ -49,6 +49,8 @@ export async function handleMember(req, deps) {
   if (body.action === 'set_booking') return setBooking(body, site, user, deps, reply, fail);
   if (body.action === 'invite_collab' || body.action === 'remove_collab') return collabAction(body, site, user, deps, reply, fail);
   if (body.action === 'upgrade_quote' || body.action === 'upgrade_layout') return upgradeAction(body, site, user, deps, reply, fail);
+  if (body.action === 'pro_quote' || body.action === 'request_pro') return proAction(body, site, user, deps, reply, fail);
+  if (body.action === 'set_next') return setNext(body, site, user, deps, reply, fail);
   if (['get_pay', 'set_pay', 'order_done'].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === 'delete_site') {
     if (!DELETABLE.includes(site.status) || site.first_published_at) return fail('not_allowed', '已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止', 409);
@@ -190,11 +192,11 @@ async function acceptInvites(user, deps, reply) {
 // 已付費、還有剩餘天數的網站：要補差額。先把網站改成多頁（可以編輯、預覽、發佈成待上線的版本），
 // 管理員確認收到差額後才發佈多頁版；在那之前正式網站維持一頁版。還沒付過費或已到期的網站不用補差額。
 const PAID_STATUSES = ['live', 'overdue', 'suspended'];
-async function quoteFor(site, deps) {
+async function quoteFor(site, deps, fn = upgradeQuote) {
   const today = new Date((deps.now ? deps.now() : new Date()).getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
   if (!PAID_STATUSES.includes(site.status) || !site.paid_until) return { days: 0, amount: 0, yearly: false };
   const last = await deps.db.getOne('payments', 'site_id=eq.' + site.id + '&select=months&order=paid_on.desc');
-  return upgradeQuote({ paidUntil: site.paid_until, today, yearly: !!(last && last.months >= 12) });
+  return fn({ paidUntil: site.paid_until, today, yearly: !!(last && last.months >= 12) });
 }
 async function upgradeAction(body, site, user, deps, reply, fail) {
   const { db } = deps;
@@ -215,4 +217,51 @@ async function upgradeAction(body, site, user, deps, reply, fail) {
   const r = done[0];
   return reply({ ok: true, layout: 'multi', pages: r.pages, upgraded_at: r.upgraded_at, upgrade_pending: pending, amount: q.amount, days: q.days, yearly: q.yearly,
     message: pending ? '已升級成多頁版。請匯款升級差額 NT$ ' + q.amount.toLocaleString('en-US') + '，我們確認收到後會自動發佈多頁版；在那之前正式網站維持一頁版。' : '已升級成多頁版，按「發佈」後正式網站就會變成多頁。' }, 200);
+}
+
+// ── 加購進階功能 ──
+// 和升級多頁版一樣：已付費、還有剩餘天數要補差額，確認收款後才開通；沒有剩餘天數（還沒付費或已到期）直接開通，下一期起依新價格收費。
+async function proAction(body, site, user, deps, reply, fail) {
+  const { db } = deps;
+  if (site.tier === 'pro') return fail('not_allowed', '這個網站已經有進階功能', 409);
+  if (site.pro_pending) return fail('not_allowed', '已經申請過了，我們確認收到差額後就會開通', 409);
+  if (site.status === 'cancelled') return fail('not_allowed', '這個網站已終止服務', 409);
+  const q = await quoteFor(site, deps, proQuote);
+  if (body.action === 'pro_quote') return reply({ ok: true, ...q }, 200);
+  const pending = q.amount > 0;
+  const now = (deps.now ? deps.now() : new Date()).toISOString();
+  const done = await db.patchReturning('rental_sites', 'id=eq.' + site.id + '&tier=eq.basic&pro_pending=eq.false', pending ? { pro_pending: true, pro_amount: q.amount, pro_requested_at: now, next_tier: null } : { tier: 'pro', pro_amount: 0, pro_requested_at: now, next_tier: null });
+  if (!done.length) return fail('not_allowed', '目前不能申請，請重新整理後再試', 409);
+  const by = 'member:' + (user.email || user.id);
+  await db.insert('site_events', { site_id: site.id, type: 'pro_requested', detail: { amount: q.amount, days: q.days, yearly: q.yearly, pending, by } }).catch(() => {});
+  if (deps.sendMail && deps.adminEmail) {
+    await deps.sendMail({ to: deps.adminEmail, ...adminProRequest({ shopName: (site.content && site.content.name) || site.slug, slug: site.slug, memberEmail: user.email || '', amount: q.amount, days: q.days, yearly: q.yearly, pending, adminUrl: deps.adminUrl }) }).catch(() => null);
+  }
+  // 直接開通、而且網站已上線：重新部署，讓已設定的行事曆等功能出現
+  if (!pending && ['live', 'overdue'].includes(site.status) && site.live_version_id && deps.dispatch) await deps.dispatch({ siteId: site.id, versionId: site.live_version_id }).catch(() => null);
+  return reply({ ok: true, pending, amount: q.amount, days: q.days, yearly: q.yearly,
+    message: pending ? '已申請進階功能。請匯款差額 NT$ ' + q.amount.toLocaleString('en-US') + '，我們確認收到後就會開通。' : '已開通進階功能，下一期起依新價格計費。' }, 200);
+}
+
+// ── 下一期改方案（降級）：多頁 → 一頁、取消進階功能。續約確認收款時才生效，當期不退差價；可以隨時取消申請 ──
+async function setNext(body, site, user, deps, reply, fail) {
+  const { db } = deps;
+  const patch = {};
+  if ('next_layout' in body) {
+    if (body.next_layout === 'single') { if (site.layout !== 'multi') return fail('bad_request', '網站已經是一頁版'); if (site.upgrade_pending) return fail('not_allowed', '升級還在等待補差額，不能同時申請改回一頁版', 409); patch.next_layout = 'single'; }
+    else if (body.next_layout === null) patch.next_layout = null;
+    else return fail('bad_request', '只能申請改回一頁版');
+  }
+  if ('next_tier' in body) {
+    if (body.next_tier === 'basic') { if (site.tier !== 'pro') return fail('bad_request', '網站沒有進階功能'); patch.next_tier = 'basic'; }
+    else if (body.next_tier === null) patch.next_tier = null;
+    else return fail('bad_request', '只能申請取消進階功能');
+  }
+  if (!Object.keys(patch).length) return fail('bad_request', '沒有要變更的項目');
+  await db.patch('rental_sites', 'id=eq.' + site.id, patch);
+  await db.insert('site_events', { site_id: site.id, type: 'next_plan_set', detail: { ...patch, by: 'member:' + (user.email || user.id) } }).catch(() => {});
+  const parts = [];
+  if (patch.next_layout === 'single') parts.push('下一期起改回一頁版');
+  if (patch.next_tier === 'basic') parts.push('下一期起取消進階功能');
+  return reply({ ok: true, ...patch, message: parts.length ? '已申請：' + parts.join('、') + '。續約確認收款時生效，內容都會保留。' : '已取消改方案的申請。' }, 200);
 }
