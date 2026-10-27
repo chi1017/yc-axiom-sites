@@ -3,11 +3,14 @@
 //   POST …/site-public/booking  線上預約申請（同上，另外檢查日期時間是否在營業時間內）
 //   POST …/site-public/shop       線上購買訂購單 → 依上線版本的價格建立訂單 → 自動轉到店家自己的綠界付款頁
 //   POST …/site-public/shop-notify, shop-info  綠界付款結果／取號通知（用該店家的金鑰驗證檢查碼；同一筆只處理一次）
+//   GET  …/site-public/slots?site=<id>  預約行事曆（進階方案）各時段剩餘名額（不含個人資料）
 //   POST …/site-public/hit      瀏覽計數（網站用 sendBeacon 送出）→ 每日每頁的次數，不記錄個人資料
 import { UUID } from '../_shared/http.mjs';
 import { checkBooking } from '../../../templates/shared/booking.js';
 import { verifyMac, checkoutFields, newTradeNo, ECPAY_TEST, ECPAY_URL } from '../_shared/ecpay.mjs';
 import { shopPayConfig, cartFromForm, itemNameOf, autoPostPage, notifyKind, orderMails } from '../_shared/shop.mjs';
+import { normalizeContent } from '../../../templates/shared/content.js';
+import { availability, checkSlot, taipeiNow, addDays } from '../../../templates/shared/slots.js';
 
 export const LIMITS = { name: 60, contact: 120, message: 2000, perIpHour: 5, perSiteDay: 100 };
 const LIVE = ['live', 'overdue'];
@@ -31,9 +34,9 @@ const page = (title, text, back) => new Response('<!doctype html><html lang="zh-
   (back ? '<p><a href="' + esc(back) + '">回到網站</a></p>' : '<p><a href="javascript:history.back()">回上一頁</a></p>') + '</body></html>',
   { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 
-export function shopMessageEmail({ shopName, name, contact, message, base, kind = 'message', when = '' }) {
-  const subject = '「' + shopName + '」' + (kind === 'booking' ? '預約申請：' + when + ' ' : '網站留言：') + name;
-  const intro = kind === 'booking' ? '有人透過網站送出預約申請，請與對方聯絡確認（網站不會自動保留時段）：' : '有人透過網站的聯絡表單留言給你：';
+export function shopMessageEmail({ shopName, name, contact, message, base, kind = 'message', when = '', held = false }) {
+  const subject = '「' + shopName + '」' + (kind === 'booking' ? (held ? '新預約：' : '預約申請：') + when + ' ' : '網站留言：') + name;
+  const intro = kind === 'booking' ? (held ? '有人透過預約行事曆預約了這個時段（名額已先保留）。請到會員專區按「確認」或「取消」，客人有留 Email 會收到通知：' : '有人透過網站送出預約申請，請與對方聯絡確認（網站不會自動保留時段）：') : '有人透過網站的聯絡表單留言給你：';
   const text = shopName + ' 你好，\n\n' + intro + '\n\n姓名：' + name + '\n聯絡方式：' + contact + '\n\n' + message + '\n\n' +
     (EMAIL.test(contact) ? '直接回覆這封信，就會寄給對方。\n' : '請用對方留下的聯絡方式回覆。\n') + '所有留言也可以在會員專區查看。\n\n網站：' + base;
   const html = '<p>' + esc(shopName) + ' 你好，</p><p>' + esc(intro) + '</p>' +
@@ -48,6 +51,7 @@ export async function handlePublic(req, deps) {
   const url = new URL(req.url);
   const route = url.pathname.replace(/\/+$/, '').split('/').pop();
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'content-type' } });
+  if (route === 'slots' && req.method === 'GET') return slots(url, deps);
   if (req.method !== 'POST') return new Response('method not allowed', { status: 405 });
   if (route === 'hit') return hit(req, deps);
   if (route === 'shop') return shop(req, deps);
@@ -69,12 +73,37 @@ async function hit(req, deps) {
   return ok;
 }
 
+// 預約行事曆的設定（上線版本、進階方案、預約有開才算）
+async function liveCal(db, site) {
+  if (site.tier !== 'pro') return null;
+  const live = await liveContent(db, site);
+  if (!live) return null;
+  const c = normalizeContent(live);
+  return c.bookingForm && c.bookingCal.enabled ? { cal: c.bookingCal, content: c } : null;
+}
+async function slots(url, deps) {
+  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
+  const out = (body) => new Response(JSON.stringify(body), { status: 200, headers });
+  const siteId = url.searchParams.get('site') || '';
+  if (!UUID.test(siteId)) return out({ days: [] });
+  const site = await deps.db.getOne('rental_sites', 'id=eq.' + siteId + '&select=id,status,tier,live_version_id');
+  if (!site || !LIVE.includes(site.status)) return out({ days: [] });
+  const lc = await liveCal(deps.db, site);
+  if (!lc) return out({ days: [] });
+  const now = (deps.now || (() => new Date()))();
+  const today = taipeiNow(now).date;
+  const rows = await deps.db.rpc('rental_slot_usage', { p_site: siteId, p_from: today, p_to: addDays(today, lc.cal.maxDays) }).catch(() => []);
+  const usage = {};
+  (rows || []).forEach((r) => { usage[r.slot_date + ' ' + r.slot_time] = Number(r.used) || 0; });
+  return out({ days: availability(lc.cal, now, usage) });
+}
+
 async function contact(req, deps, kind) {
   let f;
   try { const t = await req.text(); if (t.length > 12000) return page('留言太長', '請縮短內容後再送出。'); f = new URLSearchParams(t); } catch { return page('送出失敗', '請稍後再試一次。'); }
   const siteId = f.get('site') || '';
   if (!UUID.test(siteId)) return page('送出失敗', '表單資料不完整，請重新整理網頁後再試。');
-  const site = await deps.db.getOne('rental_sites', 'id=eq.' + siteId + '&select=id,member_id,status,public_url,custom_domain,domain_status,content,live_version_id');
+  const site = await deps.db.getOne('rental_sites', 'id=eq.' + siteId + '&select=id,member_id,status,tier,public_url,custom_domain,domain_status,content,live_version_id');
   if (!site || !LIVE.includes(site.status)) return page('送出失敗', '這個網站目前無法接收留言。');
   const base = siteBase(site);
   const thanks = base ? base + 'thanks/' : '';
@@ -82,8 +111,21 @@ async function contact(req, deps, kind) {
   if (f.get('website')) return thanks ? Response.redirect(thanks, 303) : page('已送出', '謝謝你的留言。');
   const now = (deps.now || (() => new Date()))();
   const name = clean(f.get('name'), LIMITS.name), contactV = clean(f.get('contact'), LIMITS.contact);
-  let message = clean(f.get('message'), LIMITS.message), meta = null, when = '';
-  if (kind === 'booking') {
+  let message = clean(f.get('message'), LIMITS.message), meta = null, when = '', slot = null;
+  if (kind === 'booking' && f.get('cal') === '1') {
+    // 預約行事曆：時段要在店家的班表內；名額在寫入時由資料庫函式檢查（同時段同時只有一筆能檢查並寫入）
+    const lc = await liveCal(deps.db, site);
+    if (!lc) return page('無法預約', '這個網站目前沒有開放線上選時段預約，請用電話與店家聯絡。', base);
+    const date = clean(f.get('date'), 10), time = clean(f.get('time'), 5);
+    const chk = checkSlot(lc.cal, date, time, now);
+    if (!chk.ok) return page('預約時段需要調整', chk.msg + '。', base);
+    const people = Math.max(0, Math.min(50, parseInt(f.get('people') || '0', 10) || 0)), item = clean(f.get('item'), 60), email = clean(f.get('email'), 120);
+    if (email && !EMAIL.test(email)) return page('Email 格式不正確', '請檢查 Email 後再送出，或把 Email 欄留空。', base);
+    when = date.replace(/-/g, '/') + ' ' + time;
+    slot = { date, time, capacity: lc.cal.capacity };
+    meta = { date, time, cal: true, ...(people ? { people } : {}), ...(item ? { item } : {}), ...(email ? { email } : {}) };
+    message = '預約：' + when + (people ? '・' + people + ' 人' : '') + (item ? '・' + item : '') + (email ? '\nEmail：' + email : '') + (message ? '\n備註：' + message : '');
+  } else if (kind === 'booking') {
     const date = clean(f.get('date'), 10), time = clean(f.get('time'), 5);
     const people = Math.max(0, Math.min(50, parseInt(f.get('people') || '0', 10) || 0)), item = clean(f.get('item'), 60);
     const today = new Date(now.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
@@ -116,11 +158,16 @@ async function contact(req, deps, kind) {
       message += '\n訂金：NT$ ' + amount + '（付款完成會另外通知）';
     }
   }
-  const row = await deps.db.insertReturning('site_messages', { site_id: siteId, name, contact: contactV, message, ip_hash: ipHash, kind, ...(meta ? { meta } : {}) });
+  let row;
+  if (slot) {
+    const id = await deps.db.rpc('rental_book_slot', { p_site: siteId, p_date: slot.date, p_time: slot.time, p_capacity: slot.capacity, p_name: name, p_contact: contactV, p_message: message, p_ip_hash: ipHash, p_meta: meta });
+    if (!id) return page('這個時段剛好額滿了', '很抱歉，你選的時段在送出前被預約滿了。請回到網站重新選擇其他時段。', base ? base + '#booking' : base);
+    row = { id };
+  } else row = await deps.db.insertReturning('site_messages', { site_id: siteId, name, contact: contactV, message, ip_hash: ipHash, kind, ...(meta ? { meta } : {}) });
   const owner = await deps.db.getOne('members', 'id=eq.' + site.member_id + '&select=email');
   if (owner && owner.email && deps.sendMail) {
     const shopName = (site.content && site.content.name) || '你的網站';
-    const m = shopMessageEmail({ shopName, name, contact: contactV, message, base, kind, when });
+    const m = shopMessageEmail({ shopName, name, contact: contactV, message, base, kind, when, held: !!slot });
     const r = await deps.sendMail({ to: owner.email, ...m, ...(EMAIL.test(contactV) ? { replyTo: contactV } : {}) }).catch(() => ({ ok: false }));
     if (r && r.ok && row && row.id) await deps.db.patch('site_messages', 'id=eq.' + row.id, { emailed: true }).catch(() => {});
   }
@@ -164,7 +211,7 @@ async function shop(req, deps) {
   try { const t = await req.text(); if (t.length > 8000) return page('訂購單太長', '請縮短備註後再送出。'); f = new URLSearchParams(t); } catch { return page('送出失敗', '請稍後再試一次。'); }
   const siteId = f.get('site') || '';
   if (!UUID.test(siteId)) return page('送出失敗', '訂購單資料不完整，請重新整理網頁後再試。');
-  const site = await deps.db.getOne('rental_sites', 'id=eq.' + siteId + '&select=id,member_id,status,public_url,custom_domain,domain_status,content,live_version_id');
+  const site = await deps.db.getOne('rental_sites', 'id=eq.' + siteId + '&select=id,member_id,status,tier,public_url,custom_domain,domain_status,content,live_version_id');
   if (!site || !LIVE.includes(site.status)) return page('送出失敗', '這個網站目前無法線上購買。');
   const base = siteBase(site);
   if (f.get('website')) return base ? Response.redirect(base + 'order/', 303) : page('已送出', '謝謝。');

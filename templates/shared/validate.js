@@ -75,6 +75,7 @@ export function validateForPublish(content, sections, slug, raw, { checkBrand = 
     else if ((b.btnLabel && !b.btnUrl) || (!b.btnLabel && b.btnUrl)) add('blocks.' + i, '自訂區塊「' + (b.title || i + 1) + '」的按鈕要同時填文字與連結，或兩者都留空');
   });
   if (content.style.floatLine && !content.social.line) add('social.line', '要顯示 LINE 浮動按鈕，請先填 LINE 連結');
+  if (content.bookingForm && content.bookingCal && content.bookingCal.enabled && !Object.values(content.bookingCal.weekly).some((r) => r.length)) add('bookingCal', '預約行事曆要至少設定一個每週可預約的時段（或先關閉行事曆）');
   if (content.showMap && !content.address) add('address', '要顯示地圖，請先填店家地址');
   if (template !== undefined && !getIndustry(template)) add('template', '不支援的行業類型，請重新選擇');
   const se = slugError(slug, { allowBrand: !checkBrand });

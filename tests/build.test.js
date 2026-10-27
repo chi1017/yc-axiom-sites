@@ -120,3 +120,19 @@ test('runBuild: real photos get 800px variants + srcset and the heading font; br
   assert.equal(r2.ok, true);
   assert.ok(!existsSync(join(out2, 'images/hero-800.webp')) && !readFileSync(join(out2, 'index.html'), 'utf8').includes('srcset'));
 });
+
+test('runBuild: custom code only goes live on the pro tier after approval; custom font is downloaded from site-fonts', async () => {
+  const content = { ...sample.content, code: { head: '<meta name="yc-code">', body: '' }, style: { font: 'custom', customFont: { path: SID + '/font-abc123.woff2', name: 'x' } } };
+  const fontBuf = readFileSync(new URL('../templates/base/fonts/Huninn-common.woff2', import.meta.url));
+  const run = async (tier, status) => {
+    const db = fakeDb({ content }); const got = [];
+    const g = db.getOne; db.getOne = async (t, q) => (t === 'rental_sites' ? { ...(await g(t, q)), tier } : t === 'site_code_reviews' ? (status ? { status } : null) : g(t, q));
+    db.download = async (b, p) => { got.push(b); return b === 'site-fonts' ? fontBuf : WEBP; };
+    const out = join(mkdtempSync(join(tmpdir(), 'c-')), 'dist');
+    await runBuild({ siteId: SID, outDir: out, db, cf: fakeCf(), deploy: async () => {}, log: () => {} });
+    return { html: readFileSync(join(out, 'index.html'), 'utf8'), font: existsSync(join(out, 'fonts/heading.woff2')), got, ev: db.calls.events.at(-1) };
+  };
+  const a = await run('pro', 'approved'); assert.match(a.html, /<meta name="yc-code">/); assert.ok(a.font); assert.ok(a.got.includes('site-fonts'));
+  const b = await run('pro', 'pending'); assert.doesNotMatch(b.html, /yc-code/); assert.match(b.ev.detail.skipped, /等待審核/);
+  const c = await run('basic', 'approved'); assert.doesNotMatch(c.html, /yc-code/);
+});

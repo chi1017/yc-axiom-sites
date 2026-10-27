@@ -77,6 +77,7 @@ export function buildSite(input) {
     // 聯絡表單與瀏覽計數（正式建置時由 build/run.mjs 傳入；沒有時表單顯示為示範、不送統計）
     siteId: input.siteId || '', bookingAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/booking' : '', formAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/contact' : '', hitUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/hit' : '',
     shopAction: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/shop' : '', payReady: !!input.payReady,
+    slotsUrl: input.publicApi ? input.publicApi.replace(/\/$/, '') + '/slots' : '', previewFontFormat: input.previewFontFormat == null ? null : String(input.previewFontFormat),
     headingFont: !preview && !!input.headingFont,   // 建置端會另外產生 fonts/heading.woff2（build/lib/heading-font.mjs）
     address: parseAddress(content.address),
     images: plan.map((p) => p.file),

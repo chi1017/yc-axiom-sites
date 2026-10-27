@@ -144,3 +144,47 @@ export function adminWeeklySummary({ today, counts, sections, adminUrl }) {
   const text = ['每週摘要 ' + today, '共 ' + total + ' 個網站：' + countLine, '', ...(nonEmpty.length ? nonEmpty.flatMap((s) => [s.title + '（' + s.items.length + '）', ...s.items.map((x) => '- ' + x), '']) : ['本週沒有需要處理的事項。'])].join('\n');
   return { subject, html, text };
 }
+
+// 客戶的網站有新的自訂程式碼 → 通知管理員審核
+export function adminCodeReview({ shopName, slug, memberEmail, adminUrl }) {
+  const subject = '【網站租用】自訂程式碼待審核：' + shopName;
+  const html = layout('有自訂程式碼等待審核',
+    '<p>「' + esc(shopName) + '」（' + esc(slug) + '，' + esc(memberEmail) + '）發佈了含自訂程式碼的版本。</p>' +
+    '<p>核准前，網站會照常更新但不含這段程式碼。請到管理後台的網站詳情查看程式碼並核准或退回。</p>' +
+    (adminUrl ? button(adminUrl, '開啟管理後台') : ''));
+  const text = ['有自訂程式碼等待審核', '', shopName + '（' + slug + '，' + memberEmail + '）發佈了含自訂程式碼的版本。', '核准前網站照常更新但不含程式碼。請到管理後台的網站詳情核准或退回。'].join('\n');
+  return { subject, html, text };
+}
+
+// 自訂程式碼審核結果 → 通知客戶
+export function customerCodeResult({ shopName, approved, note }) {
+  const subject = '【YC AXIOM】自訂程式碼' + (approved ? '已核准' : '沒有通過審核') + '：' + shopName;
+  const msg = approved ? '你網站的自訂程式碼已經核准，網站會在 1–2 分鐘內更新。' : '你網站的自訂程式碼沒有通過審核，所以沒有放進網站（網站其他內容照常）。';
+  const html = layout(approved ? '自訂程式碼已核准' : '自訂程式碼沒有通過審核',
+    '<p>' + esc(msg) + '</p>' + (note ? '<p>說明：' + esc(note) + '</p>' : '') +
+    (approved ? '' : '<p>你可以在編輯器修改程式碼後重新發佈，我們會再審核一次。有問題可以直接回覆這封信。</p>'));
+  const text = [msg, note ? '說明：' + note : '', approved ? '' : '可以在編輯器修改後重新發佈，我們會再審核一次。'].filter(Boolean).join('\n');
+  return { subject, html, text };
+}
+
+// 預約行事曆：店家確認或取消 → 通知客人
+export function guestBookingResult({ shopName, when, confirmed, note, base }) {
+  const subject = '【' + shopName + '】你的預約' + (confirmed ? '已確認' : '已取消') + '：' + when;
+  const msg = confirmed ? '你在 ' + shopName + ' 的預約已經確認：' + when + '。期待你的光臨！' : '很抱歉，你在 ' + shopName + ' 的預約（' + when + '）已經取消。';
+  const html = '<p>' + esc(msg) + '</p>' + (note ? '<p>店家說明：' + esc(note) + '</p>' : '') +
+    '<p style="color:#777;font-size:14px">需要更改，請直接回覆這封信，會寄給店家。' + (base ? '網站：' + esc(base) : '') + '</p>';
+  const text = [msg, note ? '店家說明：' + note : '', '需要更改請直接回覆這封信。'].filter(Boolean).join('\n');
+  return { subject, html, text };
+}
+
+// 多人協作：邀請信
+export function collabInvite({ shopName, inviter, dashboardUrl }) {
+  const subject = '【YC AXIOM】' + (inviter || '網站擁有者') + ' 邀請你一起編輯「' + shopName + '」的網站';
+  const html = layout('你被邀請一起編輯網站',
+    '<p>' + esc(inviter || '網站擁有者') + ' 邀請你一起編輯「' + esc(shopName) + '」的網站。</p>' +
+    '<p>請用收到這封信的 Email 登入（或註冊）YC AXIOM 會員專區，登入後就會在「我的網站」看到這個網站。</p>' +
+    (dashboardUrl ? button(dashboardUrl, '前往會員專區') : '') +
+    '<p style="color:#666;font-size:13px">協作者可以編輯內容、發佈更新、處理預約；收款設定、網域與刪除網站只有擁有者能操作。</p>');
+  const text = [(inviter || '網站擁有者') + ' 邀請你一起編輯「' + shopName + '」的網站。', '請用這個 Email 登入 YC AXIOM 會員專區，登入後就會看到這個網站。', dashboardUrl].filter(Boolean).join('\n');
+  return { subject, html, text };
+}

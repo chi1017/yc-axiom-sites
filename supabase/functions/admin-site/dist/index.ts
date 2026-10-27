@@ -32,6 +32,16 @@ function customerReceipt({ shopName, amount, months, paidOn, periodTo, reference
   return { subject, html, text };
 }
 var LINE_HINT = "有任何問題都可以直接回覆這封信，或用 LINE " + CONTACT.line + " 聯絡我們。";
+function customerCodeResult({ shopName, approved, note }) {
+  const subject = "【YC AXIOM】自訂程式碼" + (approved ? "已核准" : "沒有通過審核") + "：" + shopName;
+  const msg = approved ? "你網站的自訂程式碼已經核准，網站會在 1–2 分鐘內更新。" : "你網站的自訂程式碼沒有通過審核，所以沒有放進網站（網站其他內容照常）。";
+  const html = layout(
+    approved ? "自訂程式碼已核准" : "自訂程式碼沒有通過審核",
+    "<p>" + esc(msg) + "</p>" + (note ? "<p>說明：" + esc(note) + "</p>" : "") + (approved ? "" : "<p>你可以在編輯器修改程式碼後重新發佈，我們會再審核一次。有問題可以直接回覆這封信。</p>")
+  );
+  const text = [msg, note ? "說明：" + note : "", approved ? "" : "可以在編輯器修改後重新發佈，我們會再審核一次。"].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
 
 // supabase/functions/_shared/domain.mjs
 function normalizeDomain(v) {
@@ -189,7 +199,7 @@ async function applyPayment({ db: db2, site, siteId, amount, months, method, ref
 // supabase/functions/admin-site/handler.mjs
 var MAX_MONTHS = 60;
 var MAX_AMOUNT = 1e7;
-var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain"];
+var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain", "set_tier", "review_code"];
 var PHOTO_BUCKET = "site-photos";
 function taipeiDate(d) {
   return new Date(d.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
@@ -344,6 +354,39 @@ async function handleAdmin(req, deps) {
       await event("version_restore_queued", { version_id: ver.id, overwrite_draft: overwrite });
       const d = await queueDeploy({ versionId: ver.id });
       return d.ok ? reply({ ok: true, message: "已排入還原" + (overwrite ? "（並已覆蓋會員草稿）" : "（會員草稿未更動）") + "，約 1–2 分鐘。" }, 200) : fail("dispatch_failed", "沒有送出成功：" + deployWarn, 502);
+    }
+    // 方案：basic／pro。降回一般方案時，上線中的網站會重新部署（拿掉程式碼與預約行事曆）
+    case "set_tier": {
+      if (!["basic", "pro"].includes(body.tier)) return fail("bad_request", "方案只能是 basic 或 pro");
+      if (body.tier === site.tier) return reply({ ok: true, message: "方案沒有變更。" }, 200);
+      await db2.patch("rental_sites", "id=eq." + siteId, { tier: body.tier });
+      await event("tier_changed", { from: site.tier || "basic", to: body.tier });
+      if (["live", "overdue"].includes(site.status) && site.live_version_id) {
+        const d = await queueDeploy({ versionId: site.live_version_id });
+        return reply({ ok: true, message: "已改為" + (body.tier === "pro" ? "進階方案" : "一般方案") + "，網站重新部署中。", ...d.ok ? {} : { warning: deployWarn } }, 200);
+      }
+      return reply({ ok: true, message: "已改為" + (body.tier === "pro" ? "進階方案" : "一般方案") + "。" }, 200);
+    }
+    // 自訂程式碼審核：approve=true 核准（上線中的網站重新部署最新版本），false 退回；都會寄信通知客戶
+    case "review_code": {
+      const hash = String(body.hash || "");
+      if (!/^[0-9a-f]{64}$/.test(hash)) return fail("bad_request", "缺少程式碼編號");
+      const note = body.note == null ? "" : String(body.note).trim();
+      if (note.length > 300) return fail("bad_request", "說明最長 300 字");
+      const rv = await db2.getOne("site_code_reviews", "site_id=eq." + siteId + "&hash=eq." + hash + "&select=status");
+      if (!rv) return fail("not_found", "找不到這筆審核", 404);
+      const approve = body.approve === true;
+      await db2.patch("site_code_reviews", "site_id=eq." + siteId + "&hash=eq." + hash, { status: approve ? "approved" : "rejected", note: note || null, reviewed_by: by, reviewed_at: now.toISOString() });
+      await event(approve ? "code_approved" : "code_rejected", { note });
+      const member = await db2.getOne("members", "id=eq." + site.member_id + "&select=email");
+      const shopName = site.content && site.content.name || site.slug;
+      if (member && member.email && deps.sendMail) await deps.sendMail({ to: member.email, ...customerCodeResult({ shopName, approved: approve, note }) }).catch(() => null);
+      if (approve && ["live", "overdue"].includes(site.status)) {
+        const lv = await latestVersion();
+        const d = await queueDeploy({ versionId: lv && lv.id || site.live_version_id });
+        return reply({ ok: true, message: "已核准，網站重新部署中。", ...d.ok ? {} : { warning: deployWarn } }, 200);
+      }
+      return reply({ ok: true, message: approve ? "已核准。網站上線或下次發佈時會放進程式碼。" : "已退回，已通知客戶。" }, 200);
     }
     case "set_domain":
     case "check_domain":

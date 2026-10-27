@@ -2,7 +2,7 @@
 // 所有外部依賴由 deps 注入，方便在 Node 內測試。只有 JWT app_metadata.role = admin 能呼叫；
 // 每個動作都會在 site_events 留下紀錄（含操作者 Email）。
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
-import { customerReceipt } from '../_shared/emails.mjs';
+import { customerReceipt, customerCodeResult } from '../_shared/emails.mjs';
 import { normalizeDomain, domainAction } from '../_shared/domain.mjs';
 import { applyPayment } from '../_shared/payment.mjs';
 export { normalizeDomain };
@@ -10,7 +10,7 @@ export { parseOrigins };
 
 const MAX_MONTHS = 60;
 const MAX_AMOUNT = 10000000;
-const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain'];
+const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain', 'set_tier', 'review_code'];
 const PHOTO_BUCKET = 'site-photos';
 
 // 台灣日期（UTC+8）。到期日、「今天」都以台灣時間計算。
@@ -183,6 +183,41 @@ export async function handleAdmin(req, deps) {
       await event('version_restore_queued', { version_id: ver.id, overwrite_draft: overwrite });
       const d = await queueDeploy({ versionId: ver.id });
       return d.ok ? reply({ ok: true, message: '已排入還原' + (overwrite ? '（並已覆蓋會員草稿）' : '（會員草稿未更動）') + '，約 1–2 分鐘。' }, 200) : fail('dispatch_failed', '沒有送出成功：' + deployWarn, 502);
+    }
+
+    // 方案：basic／pro。降回一般方案時，上線中的網站會重新部署（拿掉程式碼與預約行事曆）
+    case 'set_tier': {
+      if (!['basic', 'pro'].includes(body.tier)) return fail('bad_request', '方案只能是 basic 或 pro');
+      if (body.tier === site.tier) return reply({ ok: true, message: '方案沒有變更。' }, 200);
+      await db.patch('rental_sites', 'id=eq.' + siteId, { tier: body.tier });
+      await event('tier_changed', { from: site.tier || 'basic', to: body.tier });
+      if (['live', 'overdue'].includes(site.status) && site.live_version_id) {
+        const d = await queueDeploy({ versionId: site.live_version_id });
+        return reply({ ok: true, message: '已改為' + (body.tier === 'pro' ? '進階方案' : '一般方案') + '，網站重新部署中。', ...(d.ok ? {} : { warning: deployWarn }) }, 200);
+      }
+      return reply({ ok: true, message: '已改為' + (body.tier === 'pro' ? '進階方案' : '一般方案') + '。' }, 200);
+    }
+
+    // 自訂程式碼審核：approve=true 核准（上線中的網站重新部署最新版本），false 退回；都會寄信通知客戶
+    case 'review_code': {
+      const hash = String(body.hash || '');
+      if (!/^[0-9a-f]{64}$/.test(hash)) return fail('bad_request', '缺少程式碼編號');
+      const note = body.note == null ? '' : String(body.note).trim();
+      if (note.length > 300) return fail('bad_request', '說明最長 300 字');
+      const rv = await db.getOne('site_code_reviews', 'site_id=eq.' + siteId + '&hash=eq.' + hash + '&select=status');
+      if (!rv) return fail('not_found', '找不到這筆審核', 404);
+      const approve = body.approve === true;
+      await db.patch('site_code_reviews', 'site_id=eq.' + siteId + '&hash=eq.' + hash, { status: approve ? 'approved' : 'rejected', note: note || null, reviewed_by: by, reviewed_at: now.toISOString() });
+      await event(approve ? 'code_approved' : 'code_rejected', { note });
+      const member = await db.getOne('members', 'id=eq.' + site.member_id + '&select=email');
+      const shopName = (site.content && site.content.name) || site.slug;
+      if (member && member.email && deps.sendMail) await deps.sendMail({ to: member.email, ...customerCodeResult({ shopName, approved: approve, note }) }).catch(() => null);
+      if (approve && ['live', 'overdue'].includes(site.status)) {
+        const lv = await latestVersion();
+        const d = await queueDeploy({ versionId: (lv && lv.id) || site.live_version_id });
+        return reply({ ok: true, message: '已核准，網站重新部署中。', ...(d.ok ? {} : { warning: deployWarn }) }, 200);
+      }
+      return reply({ ok: true, message: approve ? '已核准。網站上線或下次發佈時會放進程式碼。' : '已退回，已通知客戶。' }, 200);
     }
 
     case 'set_domain':

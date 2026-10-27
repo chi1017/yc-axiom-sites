@@ -1,4 +1,4 @@
-// Supabase Edge Function（Deno）進入點：會員自己綁定網域。邏輯在 handler.mjs。
+// Supabase Edge Function（Deno）進入點：會員自己管理網站（網域、收款、預約、協作）。BREVO_API_KEY：寄預約通知與邀請信。邏輯在 handler.mjs。
 // 使用既有的 Secrets：CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID、GITHUB_DISPATCH_TOKEN、ALLOWED_ORIGINS（與 admin-site 相同）。
 // 店家綠界金鑰加密：PAY_SECRET（選用；沒設定時由 service role key 導出，必須和 site-public 一致）
 import { handleMember } from './handler.mjs';
@@ -6,6 +6,7 @@ import { parseOrigins } from '../_shared/http.mjs';
 import { makeSupabase } from '../../../build/lib/supabase.mjs';
 import { makeCloudflare } from '../../../build/lib/cloudflare.mjs';
 import { makeGetUser, makeDispatcher } from '../_shared/runtime.mjs';
+import { makeBrevoSender } from '../_shared/brevo.mjs';
 
 const need = (k) => { const v = Deno.env.get(k); if (!v) throw new Error('missing secret ' + k); return v; };
 const SUPABASE_URL = need('SUPABASE_URL');
@@ -16,4 +17,6 @@ const dispatch = makeDispatcher({ token: Deno.env.get('GITHUB_DISPATCH_TOKEN') |
 const CF_TOKEN = Deno.env.get('CLOUDFLARE_API_TOKEN') || '', CF_ACCOUNT = Deno.env.get('CLOUDFLARE_ACCOUNT_ID') || '';
 const cf = CF_TOKEN && CF_ACCOUNT ? makeCloudflare({ token: CF_TOKEN, accountId: CF_ACCOUNT }) : undefined;
 
-Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get('ALLOWED_ORIGINS')), db, getUser, dispatch, cf, paySecret: Deno.env.get('PAY_SECRET') || SERVICE }));
+const sendMail = makeBrevoSender({ apiKey: Deno.env.get('BREVO_API_KEY') || '' });
+const SITE_BASE = Deno.env.get('OFFICIAL_SITE_URL') || 'https://chi1017.github.io/yc-axiom-site/';
+Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get('ALLOWED_ORIGINS')), db, getUser, dispatch, cf, sendMail, dashboardUrl: SITE_BASE + 'dashboard/', paySecret: Deno.env.get('PAY_SECRET') || SERVICE }));
