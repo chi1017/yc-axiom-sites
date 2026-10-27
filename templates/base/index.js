@@ -3,6 +3,7 @@ import { buildHead, buildBusinessLd, absUrl, FAVICON } from '../shared/seo.js';
 import { liveMenu, liveFaq, liveNews, liveReviews, livePosts, liveItems, liveBlocks, youtubeId } from '../shared/content.js';
 import { groupHours, hoursSummary, hasAnyHours } from '../shared/hours.js';
 import { pagesFor } from '../shared/pages.js';
+import { availability } from '../shared/slots.js';
 import { baseCss } from './styles.js';
 
 // 多頁版首頁放前幾題常見問題（含 FAQPage 結構化資料），其餘在常見問題頁
@@ -55,6 +56,7 @@ const more = (x, key, text) => '<p class="more"><a href="' + esc(x.m.href(key)) 
 function heroSec(x) {
   const { c, preview } = x;
   const heroPhoto = c.photos.hero;
+  if (c.homeStyle === 'bento') return bentoHero(x);
   const full = (c.heroStyle === 'full' || c.homeStyle === 'magazine') && (heroPhoto || preview);
   const heroImg = heroPhoto ? img(x, 'hero', heroPhoto, x.nm + ' 店家主視覺', 'high', full ? SZ.full : SZ.half)
     : (preview ? '<div class="ph-img">[主視覺照片]</div>' : '');
@@ -69,6 +71,23 @@ function heroSec(x) {
     (actions.length ? '<div class="actions">' + actions.join('') + '</div>' : '') + '</div>';
   if (full) return '<section class="hero full" id="top"><figure>' + heroImg + '</figure><div class="wrap">' + text + '</div></section>';
   return '<section class="hero" id="top"><div class="wrap hero-grid">' + text + '<figure>' + heroImg + '</figure></div></section>';
+}
+
+// 方格拼貼的主視覺：文字一格、主照片大格、兩張環境照片小格、營業資訊一格
+function bentoHero(x) {
+  const { c, preview } = x;
+  const tile = (p, role, cls, alt, eager) => (p ? '<figure class="' + cls + '">' + img(x, role, p, alt, eager, SZ.half) + '</figure>' : (preview ? '<figure class="' + cls + '"><div class="ph-img">[照片]</div></figure>' : ''));
+  const actions = [];
+  if (x.bookUrl && c.booking.label) actions.push('<a class="btn" href="' + esc(x.bookUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(c.booking.label) + '</a>');
+  else if (c.bookingForm) actions.push('<a class="btn" href="' + esc(x.m.layout === 'multi' && x.on('visit') ? x.m.href('visit') + '#booking' : '#booking') + '">線上預約</a>');
+  if (x.tel) actions.push('<a class="btn ghost" href="' + esc(x.tel) + '">撥打電話</a>');
+  const hs = hasAnyHours(c.hours) ? hoursSummary(c.hours) : '';
+  const info = hs || c.address ? '<div class="b-info">' + (hs ? '<p><b>營業時間</b><br>' + esc(hs) + '</p>' : '') + (c.address ? '<p><b>地址</b><br>' + esc(x.plainAddr || c.address) + '</p>' : '') + '</div>' : '';
+  return '<section class="hero bento" id="top"><div class="wrap bento-grid">' +
+    '<div class="b-text"><p class="kicker">' + (x.region ? esc(x.region) + '｜' : '') + esc(x.t.kindLabel) + '</p><h1>' + x.name + '</h1><p class="lead">' + (c.tagline ? esc(c.tagline) : x.ph(PH_TAG)) + '</p>' +
+    (actions.length ? '<div class="actions">' + actions.join('') + '</div>' : '') + '</div>' +
+    tile(c.photos.hero, 'hero', 'b-main', x.nm + ' 店家主視覺', 'high') + tile(c.photos.room[0], 'room-1', 'b-a', x.nm + ' ' + x.t.space.label + ' 1', true) +
+    tile(c.photos.room[1], 'room-2', 'b-b', x.nm + ' ' + x.t.space.label + ' 2', true) + info + '</div></section>';
 }
 
 // ── 子頁的頁首（多頁版每頁一個 h1）──
@@ -325,6 +344,7 @@ const PEOPLE_OFFERS = ['menu', 'room'];
 function bookingSec(x) {
   const { c, m, t } = x;
   if (!c.bookingForm) return '';
+  if (c.bookingCal && c.bookingCal.enabled) return calendarSec(x);
   const live = !x.preview && m.siteId && m.bookingAction;
   const dis = live ? '' : ' disabled';
   const note = x.preview ? '<p class="note">（預覽：正式網站上可以送出）</p>' : (!live ? '<p class="note">（示範網站：此表單不會送出）</p>' : '');
@@ -351,6 +371,62 @@ function bookingSec(x) {
     '<p><button class="btn" type="submit"' + dis + '>' + (dep ? '送出並付訂金' : '送出預約申請') + '</button></p>' +
     '<p class="note">你填寫的資料只會寄給' + x.name + '，用來確認預約。</p></form></div></section>';
 }
+
+// ── 預約行事曆（進階方案）：客人選日期與時段，額滿的時段不能選；名額由伺服器即時回傳 ──
+const WD = ['日', '一', '二', '三', '四', '五', '六'];
+const dayLabel = (d) => { const t = new Date(d + 'T00:00:00Z'); return (t.getUTCMonth() + 1) + '/' + t.getUTCDate() + '（' + WD[t.getUTCDay()] + '）'; };
+function calendarSec(x) {
+  const { c, m, t } = x;
+  const live = !x.preview && m.siteId && m.bookingAction && m.slotsUrl;
+  const dis = live ? '' : ' disabled';
+  const people = PEOPLE_OFFERS.includes(t.offer.path === 'rooms/' ? 'room' : t.offer.path === 'menu/' ? 'menu' : '');
+  const items = x.menu.map((i) => i.name);
+  const itemField = !people && items.length
+    ? '<p><label for="bk-item">想預約的' + esc(t.offer.item) + '</label><select id="bk-item" name="item"' + dis + '><option value="">（請選擇，可不選）</option>' + items.map((n) => '<option>' + esc(n) + '</option>').join('') + '</select></p>'
+    : '';
+  const dep = c.bookingDeposit && (x.preview || m.payReady) ? c.bookingDeposit : 0;
+  // 預覽：直接用班表算出接下來幾天的時段（不含已預約）；正式網站由程式向伺服器取得剩餘名額
+  let picker;
+  if (live) picker = '<div class="cal" data-cal="' + esc(m.slotsUrl + '?site=' + m.siteId) + '"><p class="note cal-msg">正在載入可預約的時段…</p></div>' +
+    '<noscript><p class="note">選時段需要開啟瀏覽器的 JavaScript，或直接用電話與我們聯絡。</p></noscript>';
+  else {
+    const days = availability(c.bookingCal, new Date()).slice(0, 7);
+    picker = days.length
+      ? '<div class="cal"><div class="cal-days">' + days.map((d, i) => '<button type="button" class="cal-day"' + (i === 0 ? ' aria-pressed="true"' : '') + ' disabled>' + esc(dayLabel(d.date)) + '</button>').join('') + '</div>' +
+        '<div class="cal-times">' + days[0].slots.map((s) => '<button type="button" class="cal-time" disabled>' + esc(s.time) + '<small>剩 ' + s.left + '</small></button>').join('') + '</div></div>' +
+        (x.preview ? '<p class="note">（預覽：正式網站會即時顯示每個時段剩下的名額，額滿的時段不能選。這是進階方案功能。）</p>' : '')
+      : '<p class="note">' + (x.preview ? '[還沒有設定每週可預約的時段]' : '目前沒有可預約的時段，請用電話與我們聯絡。') + '</p>';
+  }
+  return '<section id="booking"><div class="wrap">' + secHead(x, 'booking', '線上預約') + '<p>選擇日期與時段後填寫聯絡資料。送出後店家會確認，並用你留下的聯絡方式通知你。</p>' +
+    (dep ? '<p><b>預約需先付訂金 ' + money(dep) + '</b>，送出後會前往付款頁，付款完成才算送出預約。</p>' : '') +
+    '<form class="contact-form cal-form" method="post" action="' + esc(live ? m.bookingAction : '#') + '">' +
+    (live ? '<input type="hidden" name="site" value="' + esc(m.siteId) + '"><input type="hidden" name="cal" value="1">' : '') +
+    '<input type="hidden" name="date"><input type="hidden" name="time">' +
+    '<p class="hp" aria-hidden="true"><label>網站<input type="text" name="website" tabindex="-1" autocomplete="off"></label></p>' +
+    '<fieldset class="cal-set"><legend>日期與時段</legend>' + picker + '<p class="cal-pick note" aria-live="polite"></p></fieldset>' +
+    (people ? '<p><label for="bk-people">人數</label><input id="bk-people" name="people" type="number" min="1" max="50" value="2" required' + dis + '></p>' : '') +
+    itemField +
+    '<p><label for="bk-name">姓名</label><input id="bk-name" name="name" type="text" maxlength="60" required autocomplete="name"' + dis + '></p>' +
+    '<p><label for="bk-contact">手機</label><input id="bk-contact" name="contact" type="tel" maxlength="24" required autocomplete="tel"' + dis + '></p>' +
+    '<p><label for="bk-email">Email' + (dep ? '（付款結果會寄到這裡）' : '（選填，預約確認會寄到這裡）') + '</label><input id="bk-email" name="email" type="email" maxlength="120"' + (dep ? ' required' : '') + ' autocomplete="email"' + dis + '></p>' +
+    '<p><label for="bk-note">備註（選填）</label><textarea id="bk-note" name="message" rows="3" maxlength="500"' + dis + '></textarea></p>' +
+    '<p><button class="btn" type="submit" disabled>' + (dep ? '送出並付訂金' : '送出預約') + '</button></p>' +
+    '<p class="note">你填寫的資料只會寄給' + x.name + '，用來確認預約。</p></form></div></section>';
+}
+// 行事曆的程式：取得剩餘名額、選日期與時段、選好才能送出
+const CAL_SCRIPT = '<script>(function(){var f=document.querySelector(".cal-form"),box=f&&f.querySelector("[data-cal]");if(!box)return;' +
+  'var W=["日","一","二","三","四","五","六"],D=f.querySelector("[name=date]"),T=f.querySelector("[name=time]"),P=f.querySelector(".cal-pick"),B=f.querySelector("button[type=submit]");' +
+  'function lab(d){var t=new Date(d+"T00:00:00Z");return(t.getUTCMonth()+1)+"/"+t.getUTCDate()+"（"+W[t.getUTCDay()]+"）"}' +
+  'function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}' +
+  'fetch(box.getAttribute("data-cal")).then(function(r){return r.json()}).then(function(j){var days=(j&&j.days)||[];box.textContent="";' +
+  'if(!days.length){box.appendChild(el("p","note","目前沒有可預約的時段，請用電話與我們聯絡。"));return}' +
+  'var dw=el("div","cal-days"),tw=el("div","cal-times");box.appendChild(dw);box.appendChild(tw);' +
+  'function show(d,btn){[].forEach.call(dw.children,function(b){b.setAttribute("aria-pressed",b===btn?"true":"false")});tw.textContent="";D.value="";T.value="";B.disabled=true;P.textContent="";' +
+  'd.slots.forEach(function(s){var b=el("button","cal-time",s.time);b.type="button";b.appendChild(el("small",null,s.left>0?"剩 "+s.left:"額滿"));if(s.left<1)b.disabled=true;' +
+  'b.onclick=function(){[].forEach.call(tw.children,function(x){x.setAttribute("aria-pressed",x===b?"true":"false")});D.value=d.date;T.value=s.time;B.disabled=false;P.textContent="已選："+lab(d.date)+" "+s.time};tw.appendChild(b)})}' +
+  'days.forEach(function(d,i){var full=!d.slots.some(function(s){return s.left>0});var b=el("button","cal-day",lab(d.date)+(full?" 額滿":""));b.type="button";b.onclick=function(){show(d,b)};dw.appendChild(b);if(i===0)show(d,b)})' +
+  '}).catch(function(){box.textContent="";box.appendChild(el("p","note","時段載入失敗，請重新整理網頁，或用電話與我們聯絡。"))});' +
+  'f.addEventListener("submit",function(e){if(!D.value||!T.value){e.preventDefault();P.textContent="請先選擇日期與時段"}})})();</script>';
 
 // ── 雜誌式首頁 ──
 // 滿版圖文對半的大區塊（side：圖片在左 'left' 或右 'right'）
@@ -408,6 +484,13 @@ function magazineMain(x, multi) {
 
 // 自訂圖文區塊：標題、文字、照片（左或右）、按鈕
 function blockSec(x, b) {
+  if (b.kind === 'html') {
+    const id = 'b-' + b.id;
+    const title = b.title ? '<h2>' + esc(b.title) + '</h2>' : '';
+    // 預覽不執行程式碼（安全）：只顯示一個說明框；正式網站在管理員核准後才放進原始程式碼
+    if (x.preview) return '<section class="block embed-block" id="' + id + '"><div class="wrap">' + title + '<div class="embed-ph">[嵌入的程式碼：預覽不執行，正式網站經審核後顯示]' + (b.html ? '<code>' + esc(b.html.slice(0, 120)) + (b.html.length > 120 ? '…' : '') + '</code>' : '') + '</div></div></section>';
+    return '<section class="block embed-block" id="' + id + '"><div class="wrap">' + title + '\n' + b.html + '\n</div></section>';
+  }
   const paras = paragraphs(b.body);
   const body = (b.title ? '<h2>' + esc(b.title) + '</h2>' : (x.preview ? '<h2>' + x.ph('區塊標題') + '</h2>' : '')) +
     (paras.length ? paras.map((t) => '<p>' + esc(t) + '</p>').join('') : (x.preview && !b.title ? '<p>' + x.ph('區塊內容') + '</p>' : '')) +
@@ -516,12 +599,14 @@ function render(m) {
   const footNav = multi ? '<nav class="foot-nav" aria-label="頁尾選單"><a href="' + esc(m.href('home')) + '">首頁</a>' + navItems.map((i) => '<a href="' + esc(i[2]) + '">' + i[1] + '</a>').join('') + '</nav>' : '';
   const enLink = c.en.enabled && c.en.name && c.en.intro && m.enHref ? '<a class="lang-link" href="' + esc(m.enHref) + '" hreflang="en" lang="en">English</a>' : '';
   const footer = '<footer><div class="wrap"><span>© ' + new Date().getFullYear() + ' ' + (c.name ? esc(c.name) : x.ph(PH_NAME)) + (enLink ? '　' + enLink : '') + '</span>' + footNav + '</div></footer>';
-  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n</head>\n<body class="' + bodyClass(c) + '">\n' +
+  const code = !m.preview && c.code ? c.code : { head: '', body: '' };   // 全站自訂程式碼（預覽不放）
+  const sideExtra = c.homeStyle === 'sidebar' ? '<div class="side-extra">' + (c.phone ? '<a href="' + esc(x.tel || '#') + '">' + esc(c.phone) + '</a>' : '') + (c.address ? '<span>' + esc(x.plainAddr || c.address) + '</span>' : '') + '</div>' : '';
+  return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n' + buildHead(m) + '\n<style>' + baseCss(m.colors, cssOpts(m)) + '</style>\n' + (code.head ? code.head + '\n' : '') + '</head>\n<body class="' + bodyClass(c) + '">\n' +
     '<a class="skip" href="#main">跳到主要內容</a>\n' +
     '<header class="top"><div class="wrap"><a class="brand" href="' + esc(multi ? m.href('home') : (anchor || '#top')) + '">' + x.name + '</a>' +
     '<button class="nav-btn" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="bars" aria-hidden="true"></span>選單</button>' +
-    '<nav id="site-nav" aria-label="頁面選單">' + nav + '</nav></div></header>\n' +
-    '<main id="main">\n' + body + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + (body.includes('id="order"') ? SHOP_SCRIPT + '\n' : '') + floatLine(m, body) + trackers(m) + '</body>\n</html>\n';
+    '<nav id="site-nav" aria-label="頁面選單">' + nav + '</nav>' + sideExtra + '</div></header>\n' +
+    '<main id="main">\n' + body + '\n</main>\n' + footer + '\n' + SCRIPT + '\n' + (body.includes('id="order"') ? SHOP_SCRIPT + '\n' : '') + (body.includes('data-cal=') ? CAL_SCRIPT + '\n' : '') + floatLine(m, body) + trackers(m) + (code.body ? code.body + '\n' : '') + '</body>\n</html>\n';
 }
 
 // 404 頁：不存在的網址回傳真正的 404（避免「軟 404」被當成重複首頁收錄）。
@@ -613,12 +698,13 @@ function renderOrderDone(m) {
 // 標題字型、按鈕形狀（預覽時 previewFontUrl 指向完整字型檔，正式建置用 fonts/heading.woff2 子集）
 function cssOpts(m) {
   const st = (m.content && m.content.style) || {};
-  return { headingFont: m.headingFont, font: st.font, button: st.button, fontUrl: m.previewFontUrl || '' };
+  return { headingFont: m.headingFont, font: st.font, button: st.button, fontUrl: m.previewFontUrl || '', fontFormat: m.previewFontFormat != null ? m.previewFontFormat : (m.previewFontUrl ? 'woff2' : '') };
 }
 // 外觀細節用 body 的 class 切換（標題裝飾線、背景紋理、捲動動畫）
 function bodyClass(c) {
   const st = c.style || {};
-  return ['hd-' + (st.head || 'plain'), st.texture && st.texture !== 'none' ? 'tex-' + st.texture : '', 'mo-' + (st.motion || 'rise')].filter(Boolean).join(' ');
+  const ly = ['center', 'bento', 'sidebar'].includes(c.homeStyle) ? 'ly-' + c.homeStyle : '';
+  return ['hd-' + (st.head || 'plain'), st.texture && st.texture !== 'none' ? 'tex-' + st.texture : '', 'mo-' + (st.motion || 'rise'), ly].filter(Boolean).join(' ');
 }
 // LINE 浮動按鈕（需要先填 LINE 連結）；頁面有購物車列時往上移，避免重疊
 function floatLine(m, body) {

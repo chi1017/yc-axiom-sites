@@ -11,15 +11,19 @@ export const LIMITS = {
   posts: 12, postTitle: 60, postBody: 3000,
   enName: 60, enTagline: 100, enIntro: 1000, enAddress: 160,
   shopItems: 24, shopName: 40, shopDesc: 200, shopPrice: 200000, shopNote: 300, deposit: 100000,
-  blocks: 6, blockTitle: 40, blockBody: 1500, btnLabel: 16, seoTitle: 60, seoDesc: 160, sub: 60
+  blocks: 6, blockTitle: 40, blockBody: 1500, btnLabel: 16, seoTitle: 60, seoDesc: 160, sub: 60,
+  html: 20000, code: 20000, fontName: 40, calRanges: 4, calClosed: 60
 };
 // 首頁區塊（可調整順序）。主視覺固定在最上面；自訂區塊的 key 是 'b:<代碼>'
 export const ORDER_KEYS = ['about', 'video', 'menu', 'interior', 'shop', 'reviews', 'news', 'posts', 'faq', 'blocks', 'booking', 'visit', 'contact'];
 export const ORDER_LABELS = { about: '關於我們', video: '影片', menu: '價目', interior: '環境照片', shop: '線上購買', reviews: '客人評價', news: '最新消息', posts: '文章', faq: '常見問題', booking: '線上預約', visit: '來店資訊', contact: '聯絡表單' };
 export const BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
 // 標題字型：serif＝明體（預設）、sans＝黑體、round＝圓體（jf open 粉圓）、kai＝楷體（霞鶩文楷）
-export const FONTS = ['serif', 'sans', 'round', 'kai'];
-export const FONT_LABELS = { serif: '明體（典雅）', sans: '黑體（俐落）', round: '圓體（親切）', kai: '楷體（手寫感）' };
+// custom＝店家自己上傳的字型（style.customFont；沒有上傳時改回明體）
+export const FONTS = ['serif', 'sans', 'round', 'kai', 'custom'];
+export const FONT_LABELS = { serif: '明體（典雅）', sans: '黑體（俐落）', round: '圓體（親切）', kai: '楷體（手寫感）', custom: '自己上傳的字型' };
+// 上傳字型的存放路徑（私有的 site-fonts 空間）：<網站 id>/font-<代碼>.<副檔名>
+export const FONT_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/font-[a-z0-9]{6,20}\.(woff2|woff|ttf|otf)$/;
 export const BUTTONS = ['pill', 'round', 'square'];
 export const BUTTON_LABELS = { pill: '膠囊', round: '圓角', square: '方角' };
 // 外觀細節：背景紋理、捲動動畫、區塊排版（全部用 CSS 做，不增加網站載入的程式）
@@ -38,8 +42,15 @@ export const SUB_KEYS = ['about', 'video', 'menu', 'interior', 'shop', 'reviews'
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const DAY_LABELS = { mon: '週一', tue: '週二', wed: '週三', thu: '週四', fri: '週五', sat: '週六', sun: '週日' };
 export const HERO_STYLES = ['card', 'full'];
-// 首頁樣式：standard＝區塊依序排列；magazine＝滿版主視覺＋圖文左右交錯大區塊＋資訊帶＋照片牆（雜誌式）
-export const HOME_STYLES = ['standard', 'magazine'];
+// 版型風格：standard＝區塊依序排列；magazine＝滿版主視覺＋圖文左右交錯大區塊＋資訊帶＋照片牆（雜誌式）；
+// center＝置中大字、照片橫幅、窄欄閱讀；bento＝首頁方格拼貼、區塊標題在左欄；sidebar＝電腦版左側固定選單
+export const HOME_STYLES = ['standard', 'magazine', 'center', 'bento', 'sidebar'];
+export const HOME_LABELS = { standard: '標準', magazine: '雜誌', center: '置中大字', bento: '方格拼貼', sidebar: '左側選單' };
+// 自訂區塊的種類：text＝圖文；html＝嵌入程式碼（進階方案，需管理員審核後才會出現在正式網站）
+export const BLOCK_KINDS = ['text', 'html'];
+// 預約行事曆（進階方案）：每週時段、每段長度與可接組數；客人只能選有名額的時段
+export const SLOT_MINUTES = [15, 20, 30, 45, 60, 90, 120, 180];
+export function emptyCal() { const weekly = {}; DAYS.forEach((d) => { weekly[d] = []; }); return { enabled: false, slotMinutes: 60, capacity: 1, leadHours: 2, maxDays: 30, weekly, closed: [] }; }
 export const SECTION_KEYS = ['menu', 'interior', 'faq', 'news'];
 export const SECTION_LABELS = { menu: '菜單', interior: '店內環境', faq: '常見問題', news: '最新消息' };
 
@@ -71,8 +82,10 @@ export function emptyContent() {
     shop: { enabled: false, items: [], note: '' },   // items: [{ id, name, price, desc, photo }]
     bookingDeposit: 0,           // 線上預約要先付的訂金（0＝不收）
     order: [],                   // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
-    blocks: [],                  // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: 'serif', button: 'pill', floatLine: false, texture: 'none', motion: 'rise', head: 'plain', menuStyle: 'list', gallery: 'masonry', reviewStyle: 'cards', colors: null },
+    blocks: [],                  // 自訂區塊 [{ id, kind, title, body, photo, btnLabel, btnUrl, side, hidden, html }]
+    style: { font: 'serif', button: 'pill', floatLine: false, texture: 'none', motion: 'rise', head: 'plain', menuStyle: 'list', gallery: 'masonry', reviewStyle: 'cards', colors: null, customFont: null },
+    code: { head: '', body: '' }, // 全站自訂程式碼（進階方案，需管理員審核）：head＝放在 </head> 前；body＝放在 </body> 前
+    bookingCal: emptyCal(),      // 預約行事曆（進階方案）
     subs: {},                    // 各區塊標題下方的一句副標題（選填）
     seo: { title: '', description: '', share: null }              // 自訂首頁標題、描述、分享圖片（空的＝自動產生）
   };
@@ -216,20 +229,54 @@ export function normalizeContent(raw) {
     let id = String(o.id || '').toLowerCase();
     if (!BLOCK_ID_RE.test(id) || bids.has(id)) id = '';
     if (id) bids.add(id);
-    return { id, title: line(o.title, LIMITS.blockTitle), body: str(o.body, LIMITS.blockBody), photo: photo(o.photo),
-      btnLabel: line(o.btnLabel, LIMITS.btnLabel), btnUrl: clip(safeHttpsUrl(o.btnUrl), 500), side: o.side === 'left' ? 'left' : 'right', hidden: o.hidden === true };
+    const kind = o.kind === 'html' ? 'html' : 'text';
+    return { id, kind, title: line(o.title, LIMITS.blockTitle), body: str(o.body, LIMITS.blockBody), photo: photo(o.photo),
+      btnLabel: line(o.btnLabel, LIMITS.btnLabel), btnUrl: clip(safeHttpsUrl(o.btnUrl), 500), side: o.side === 'left' ? 'left' : 'right', hidden: o.hidden === true,
+      ...(kind === 'html' ? { html: rawCode(o.html, LIMITS.html) } : {}) };
   }).filter((b) => b.id);
   c.order = normalizeOrder(r.order, c.blocks);
   const st = r.style && typeof r.style === 'object' ? r.style : {};
   const pick = (list, v) => (list.includes(v) ? v : list[0]);
   c.style = { font: FONTS.includes(st.font) ? st.font : 'serif', button: BUTTONS.includes(st.button) ? st.button : 'pill', floatLine: st.floatLine === true,
     texture: pick(TEXTURES, st.texture), motion: pick(MOTIONS, st.motion), head: pick(HEAD_STYLES, st.head),
-    menuStyle: pick(MENU_STYLES, st.menuStyle), gallery: pick(GALLERY_STYLES, st.gallery), reviewStyle: pick(REVIEW_STYLES, st.reviewStyle), colors: normalizeColors4(st.colors) };
+    menuStyle: pick(MENU_STYLES, st.menuStyle), gallery: pick(GALLERY_STYLES, st.gallery), reviewStyle: pick(REVIEW_STYLES, st.reviewStyle), colors: normalizeColors4(st.colors),
+    customFont: customFontOf(st.customFont) };
+  if (c.style.font === 'custom' && !c.style.customFont) c.style.font = 'serif';
+  const cd = r.code && typeof r.code === 'object' ? r.code : {};
+  c.code = { head: rawCode(cd.head, LIMITS.code), body: rawCode(cd.body, LIMITS.code) };
+  c.bookingCal = normalizeCal(r.bookingCal);
   const sb = r.subs && typeof r.subs === 'object' ? r.subs : {};
   c.subs = {};
   SUB_KEYS.forEach((k) => { const v = line(sb[k], LIMITS.sub); if (v) c.subs[k] = v; });
   const so = r.seo && typeof r.seo === 'object' ? r.seo : {};
   c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
+  return c;
+}
+
+// 程式碼原樣保留（只去掉控制字元與頭尾空白）；跳脫與安全由管理員審核負責，預覽一律不執行
+function rawCode(v, n) { return clip(String(v == null ? '' : v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim(), n); }
+function customFontOf(f) {
+  if (!f || typeof f !== 'object') return null;
+  const path = String(f.path || '');
+  if (!FONT_PATH_RE.test(path)) return null;
+  return { path, name: line(f.name, LIMITS.fontName) || '自訂字型' };
+}
+const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+export function normalizeCal(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const c = emptyCal();
+  c.enabled = r.enabled === true;
+  c.slotMinutes = SLOT_MINUTES.includes(Number(r.slotMinutes)) ? Number(r.slotMinutes) : 60;
+  c.capacity = intIn(r.capacity, 1, 50) || 1;
+  c.leadHours = intIn(r.leadHours, 0, 168) ?? 2;
+  c.maxDays = intIn(r.maxDays, 1, 90) || 30;
+  const w = r.weekly && typeof r.weekly === 'object' ? r.weekly : {};
+  DAYS.forEach((d) => {
+    c.weekly[d] = arr(w[d]).map((x) => (x && typeof x === 'object' ? { start: String(x.start || ''), end: String(x.end || '') } : null))
+      .filter((x) => x && validTime(x.start) && validTime(x.end) && toMin(x.start) < toMin(x.end))
+      .sort((a, b) => a.start.localeCompare(b.start)).slice(0, LIMITS.calRanges);
+  });
+  c.closed = [...new Set(arr(r.closed).filter(validDate))].sort().slice(0, LIMITS.calClosed);
   return c;
 }
 
@@ -263,7 +310,7 @@ export function normalizeOrder(raw, blocks) {
   });
   return out;
 }
-export const liveBlocks = (c) => c.blocks.filter((b) => !b.hidden && (b.title || b.body || b.photo));
+export const liveBlocks = (c) => c.blocks.filter((b) => !b.hidden && (b.kind === 'html' ? !!b.html : (b.title || b.body || b.photo)));
 
 // 上線的商品：有代碼、名稱、價格
 export const liveItems = (c) => c.shop.items.filter((i) => i.id && i.name && i.price);

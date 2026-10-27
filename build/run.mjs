@@ -10,8 +10,11 @@ import { sniffImage, MAX_IMAGE_BYTES, makeSmall } from './lib/images.mjs';
 import { buildMaintenancePage, shopContact } from '../templates/shared/maintenance.js';
 import { buildClosedPage } from '../templates/shared/closed.js';
 import { customerGoLive } from '../supabase/functions/_shared/emails.mjs';
+import { effectiveContent, hasCustomCode, codeHash } from '../templates/shared/code.js';
 
 const BUCKET = 'site-photos';
+const FONT_BUCKET = 'site-fonts';
+const MAX_FONT_BYTES = 20 * 1024 * 1024;
 const DEPLOYABLE = ['live', 'overdue'];   // 一般建置只允許這兩種；維護模式只允許 suspended
 const MODES = ['normal', 'maintenance', 'closed'];
 
@@ -42,8 +45,17 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     const ver = await db.getOne('site_versions', 'id=eq.' + encodeURIComponent(vid) + '&site_id=eq.' + encodeURIComponent(siteId) + '&select=*');
     if (!ver) throw new Error('找不到版本 ' + vid);
 
-    const content = normalizeContent(ver.content), palette = normalizePalette(ver.palette), sections = normalizeSections(ver.sections);
-    const check = validateForPublish(content, sections, site.slug, undefined, { template: site.template });
+    const raw = normalizeContent(ver.content), palette = normalizePalette(ver.palette), sections = normalizeSections(ver.sections);
+    const check = validateForPublish(raw, sections, site.slug, undefined, { template: site.template });
+    // 進階方案功能：一般方案不放程式碼與預約行事曆；程式碼要管理員核准過（同一份內容）才放進網站
+    let codeApproved = false;
+    if (site.tier === 'pro' && hasCustomCode(raw)) {
+      const hash = await codeHash(raw);
+      const rv = await db.getOne('site_code_reviews', 'site_id=eq.' + encodeURIComponent(siteId) + '&hash=eq.' + hash + '&select=status').catch(() => null);
+      codeApproved = !!(rv && rv.status === 'approved');
+      if (!codeApproved) log('自訂程式碼尚未核准，這次部署不含程式碼');
+    }
+    const content = effectiveContent(raw, { tier: site.tier, codeApproved });
     // 版型：網站已升級成多頁時，舊的一頁版本也用多頁輸出（頁面勾選沿用當時的區塊開關），網站不會因還原舊版而退回一頁
     const layout = normalizeLayout(site.layout) === 'multi' ? 'multi' : normalizeLayout(ver.layout);
     const pages = layout === 'multi' ? (normalizeLayout(ver.layout) === 'multi' ? normalizePages(ver.pages) : pagesFromSections(ver.sections)) : undefined;
@@ -73,7 +85,14 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     let built = buildSite({ ...buildArgs, headingFont: true });
     // 標題字型：只含標題用到的字；產生失敗就改用系統字重建（不讓字型問題擋住部署）
     let fontBuf = null;
-    try { fontBuf = await buildHeadingFont(built.files, content.style.font); } catch (e) { log('標題字型產生失敗，改用系統字：' + e.message); }
+    try {
+      let srcBuf = null;
+      if (content.style.font === 'custom' && content.style.customFont) {
+        srcBuf = await db.download(FONT_BUCKET, content.style.customFont.path);
+        if (srcBuf.length > MAX_FONT_BYTES) throw new Error('上傳的字型檔太大');
+      }
+      fontBuf = await buildHeadingFont(built.files, content.style.font, srcBuf);
+    } catch (e) { log('標題字型產生失敗，改用系統字：' + e.message); }
     if (!fontBuf) built = buildSite(buildArgs);
     rmSync(outDir, { recursive: true, force: true });
     mkdirSync(outDir, { recursive: true });
@@ -90,7 +109,8 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
       cf_project_name: project.name, public_url: siteUrl, live_version_id: vid, last_published_at: ts,
       ...(site.first_published_at ? {} : { first_published_at: ts })
     });
-    await event('deploy_ok', { url: siteUrl, version_id: vid, layout, pages: built.pages.length, seconds: Math.round((Date.now() - t0) / 1000) });
+    await event('deploy_ok', { url: siteUrl, version_id: vid, layout, pages: built.pages.length, seconds: Math.round((Date.now() - t0) / 1000),
+      ...(site.tier === 'pro' && hasCustomCode(raw) && !codeApproved ? { skipped: '自訂程式碼等待審核，這次沒有放進網站' } : {}) });
     log('部署完成：' + siteUrl);
     await notifyGoLive({ site, content, siteUrl, db, sendMail, event, log, now });
     return { ok: true, url: siteUrl };

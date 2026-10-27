@@ -101,11 +101,17 @@ var LIMITS = {
   btnLabel: 16,
   seoTitle: 60,
   seoDesc: 160,
-  sub: 60
+  sub: 60,
+  html: 2e4,
+  code: 2e4,
+  fontName: 40,
+  calRanges: 4,
+  calClosed: 60
 };
 var ORDER_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "blocks", "booking", "visit", "contact"];
 var BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
-var FONTS = ["serif", "sans", "round", "kai"];
+var FONTS = ["serif", "sans", "round", "kai", "custom"];
+var FONT_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/font-[a-z0-9]{6,20}\.(woff2|woff|ttf|otf)$/;
 var BUTTONS = ["pill", "round", "square"];
 var TEXTURES = ["none", "paper", "dots", "grid", "glow", "contour"];
 var HEAD_STYLES = ["plain", "num", "bar", "chip"];
@@ -117,7 +123,15 @@ var SUB_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news",
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var DAY_LABELS = { mon: "週一", tue: "週二", wed: "週三", thu: "週四", fri: "週五", sat: "週六", sun: "週日" };
 var HERO_STYLES = ["card", "full"];
-var HOME_STYLES = ["standard", "magazine"];
+var HOME_STYLES = ["standard", "magazine", "center", "bento", "sidebar"];
+var SLOT_MINUTES = [15, 20, 30, 45, 60, 90, 120, 180];
+function emptyCal() {
+  const weekly = {};
+  DAYS.forEach((d) => {
+    weekly[d] = [];
+  });
+  return { enabled: false, slotMinutes: 60, capacity: 1, leadHours: 2, maxDays: 30, weekly, closed: [] };
+}
 var SECTION_KEYS = ["menu", "interior", "faq", "news"];
 function emptyHours() {
   const h = {};
@@ -168,8 +182,12 @@ function emptyContent() {
     order: [],
     // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
     blocks: [],
-    // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards", colors: null },
+    // 自訂區塊 [{ id, kind, title, body, photo, btnLabel, btnUrl, side, hidden, html }]
+    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards", colors: null, customFont: null },
+    code: { head: "", body: "" },
+    // 全站自訂程式碼（進階方案，需管理員審核）：head＝放在 </head> 前；body＝放在 </body> 前
+    bookingCal: emptyCal(),
+    // 預約行事曆（進階方案）
     subs: {},
     // 各區塊標題下方的一句副標題（選填）
     seo: { title: "", description: "", share: null }
@@ -312,15 +330,18 @@ function normalizeContent(raw) {
     let id = String(o.id || "").toLowerCase();
     if (!BLOCK_ID_RE.test(id) || bids.has(id)) id = "";
     if (id) bids.add(id);
+    const kind = o.kind === "html" ? "html" : "text";
     return {
       id,
+      kind,
       title: line(o.title, LIMITS.blockTitle),
       body: str(o.body, LIMITS.blockBody),
       photo: photo(o.photo),
       btnLabel: line(o.btnLabel, LIMITS.btnLabel),
       btnUrl: clip(safeHttpsUrl(o.btnUrl), 500),
       side: o.side === "left" ? "left" : "right",
-      hidden: o.hidden === true
+      hidden: o.hidden === true,
+      ...kind === "html" ? { html: rawCode(o.html, LIMITS.html) } : {}
     };
   }).filter((b2) => b2.id);
   c.order = normalizeOrder(r.order, c.blocks);
@@ -336,8 +357,13 @@ function normalizeContent(raw) {
     menuStyle: pick(MENU_STYLES, st.menuStyle),
     gallery: pick(GALLERY_STYLES, st.gallery),
     reviewStyle: pick(REVIEW_STYLES, st.reviewStyle),
-    colors: normalizeColors4(st.colors)
+    colors: normalizeColors4(st.colors),
+    customFont: customFontOf(st.customFont)
   };
+  if (c.style.font === "custom" && !c.style.customFont) c.style.font = "serif";
+  const cd = r.code && typeof r.code === "object" ? r.code : {};
+  c.code = { head: rawCode(cd.head, LIMITS.code), body: rawCode(cd.body, LIMITS.code) };
+  c.bookingCal = normalizeCal(r.bookingCal);
   const sb = r.subs && typeof r.subs === "object" ? r.subs : {};
   c.subs = {};
   SUB_KEYS.forEach((k) => {
@@ -346,6 +372,31 @@ function normalizeContent(raw) {
   });
   const so = r.seo && typeof r.seo === "object" ? r.seo : {};
   c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
+  return c;
+}
+function rawCode(v, n) {
+  return clip(String(v == null ? "" : v).replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim(), n);
+}
+function customFontOf(f) {
+  if (!f || typeof f !== "object") return null;
+  const path = String(f.path || "");
+  if (!FONT_PATH_RE.test(path)) return null;
+  return { path, name: line(f.name, LIMITS.fontName) || "自訂字型" };
+}
+var toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+function normalizeCal(raw) {
+  const r = raw && typeof raw === "object" ? raw : {};
+  const c = emptyCal();
+  c.enabled = r.enabled === true;
+  c.slotMinutes = SLOT_MINUTES.includes(Number(r.slotMinutes)) ? Number(r.slotMinutes) : 60;
+  c.capacity = intIn(r.capacity, 1, 50) || 1;
+  c.leadHours = intIn(r.leadHours, 0, 168) ?? 2;
+  c.maxDays = intIn(r.maxDays, 1, 90) || 30;
+  const w = r.weekly && typeof r.weekly === "object" ? r.weekly : {};
+  DAYS.forEach((d) => {
+    c.weekly[d] = arr(w[d]).map((x) => x && typeof x === "object" ? { start: String(x.start || ""), end: String(x.end || "") } : null).filter((x) => x && validTime(x.start) && validTime(x.end) && toMin(x.start) < toMin(x.end)).sort((a, b) => a.start.localeCompare(b.start)).slice(0, LIMITS.calRanges);
+  });
+  c.closed = [...new Set(arr(r.closed).filter(validDate))].sort().slice(0, LIMITS.calClosed);
   return c;
 }
 function normalizePalette(p) {
@@ -620,6 +671,7 @@ function validateForPublish(content, sections, slug, raw, { checkBrand = false, 
     else if (b2.btnLabel && !b2.btnUrl || !b2.btnLabel && b2.btnUrl) add("blocks." + i, "自訂區塊「" + (b2.title || i + 1) + "」的按鈕要同時填文字與連結，或兩者都留空");
   });
   if (content.style.floatLine && !content.social.line) add("social.line", "要顯示 LINE 浮動按鈕，請先填 LINE 連結");
+  if (content.bookingForm && content.bookingCal && content.bookingCal.enabled && !Object.values(content.bookingCal.weekly).some((r) => r.length)) add("bookingCal", "預約行事曆要至少設定一個每週可預約的時段（或先關閉行事曆）");
   if (content.showMap && !content.address) add("address", "要顯示地圖，請先填店家地址");
   if (template !== void 0 && !getIndustry(template)) add("template", "不支援的行業類型，請重新選擇");
   const se = slugError(slug, { allowBrand: !checkBrand });
@@ -674,7 +726,33 @@ function adminFirstPublish({ shopName, slug, previewUrl, memberEmail, adminUrl }
   return { subject, html, text };
 }
 var ADD_CONTACT = "為避免我們的信件被歸到垃圾信匣，請把 " + CONTACT.email + " 加入你的聯絡人；直接回覆這封信也會寄到我們的信箱。";
+var button = (href, label) => '<p><a href="' + esc(href) + '" style="display:inline-block;background:#2f4a3a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">' + esc(label) + "</a></p>";
 var LINE_HINT = "有任何問題都可以直接回覆這封信，或用 LINE " + CONTACT.line + " 聯絡我們。";
+function adminCodeReview({ shopName, slug, memberEmail, adminUrl }) {
+  const subject = "【網站租用】自訂程式碼待審核：" + shopName;
+  const html = layout(
+    "有自訂程式碼等待審核",
+    "<p>「" + esc(shopName) + "」（" + esc(slug) + "，" + esc(memberEmail) + "）發佈了含自訂程式碼的版本。</p><p>核准前，網站會照常更新但不含這段程式碼。請到管理後台的網站詳情查看程式碼並核准或退回。</p>" + (adminUrl ? button(adminUrl, "開啟管理後台") : "")
+  );
+  const text = ["有自訂程式碼等待審核", "", shopName + "（" + slug + "，" + memberEmail + "）發佈了含自訂程式碼的版本。", "核准前網站照常更新但不含程式碼。請到管理後台的網站詳情核准或退回。"].join("\n");
+  return { subject, html, text };
+}
+
+// templates/shared/code.js
+function customCode(c) {
+  const blocks = (c.blocks || []).filter((b) => b.kind === "html" && !b.hidden && b.html).map((b) => ({ id: b.id, html: b.html }));
+  const head = c.code && c.code.head || "", body = c.code && c.code.body || "";
+  return { head, body, blocks };
+}
+function hasCustomCode(c) {
+  const x = customCode(c);
+  return !!(x.head || x.body || x.blocks.length);
+}
+async function codeHash(c) {
+  const data = new TextEncoder().encode(JSON.stringify(customCode(c)));
+  const buf = await globalThis.crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 // supabase/functions/_shared/http.mjs
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -714,7 +792,12 @@ async function handlePublish(req, deps) {
   if (typeof siteId !== "string" || !UUID.test(siteId)) return reply({ error: "bad_request", message: "缺少網站編號" }, 400);
   const { db: db2 } = deps;
   const now = (deps.now || (() => /* @__PURE__ */ new Date()))();
-  const site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
+  let site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
+  if (!site) {
+    const cm = await db2.getOne("site_members", "site_id=eq." + siteId + "&member_id=eq." + user.id + "&status=eq.active&select=site_id");
+    const s2 = cm ? await db2.getOne("rental_sites", "id=eq." + siteId + "&select=*") : null;
+    if (s2 && s2.tier === "pro") site = s2;
+  }
   if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   const member = await db2.getOne("members", "id=eq." + user.id + "&select=consented_at,email");
   if (!member || !member.consented_at) return reply({ error: "consent_required", message: "請先同意服務條款與隱私權政策" }, 403);
@@ -733,17 +816,32 @@ async function handlePublish(req, deps) {
   if (!version || !version.id) return reply({ error: "server_error", message: "儲存版本失敗，請稍後再試" }, 500);
   const event = (type, detail) => db2.insert("site_events", { site_id: siteId, type, detail }).catch(() => {
   });
+  let codeNote = "";
+  if (site.tier === "pro" && hasCustomCode(content)) {
+    const hash = await codeHash(content);
+    const rv = await db2.getOne("site_code_reviews", "site_id=eq." + siteId + "&hash=eq." + hash + "&select=status");
+    if (!rv) {
+      await db2.insert("site_code_reviews", { site_id: siteId, hash, status: "pending", version_id: version.id });
+      await event("code_review_requested", { version_id: version.id });
+      const mail = adminCodeReview({ shopName: content.name, slug: site.slug, memberEmail: member.email || user.email || "", adminUrl: deps.adminUrl });
+      await deps.sendMail({ to: deps.adminEmail, ...mail }).catch(() => null);
+    }
+    const st = rv ? rv.status : "pending";
+    if (st === "pending") codeNote = "自訂程式碼需要審核，核准後會自動放進網站。";
+    else if (st === "rejected") codeNote = "這段自訂程式碼沒有通過審核，不會放進網站。";
+  }
+  const withNote = (msg) => codeNote ? msg + codeNote : msg;
   if (site.status === "draft") {
     await db2.patch("rental_sites", "id=eq." + siteId + "&status=eq.draft", { status: "pending" });
     await event("published_first", { version_id: version.id });
     const mail = adminFirstPublish({ shopName: content.name, slug: site.slug, previewUrl: deps.previewBase + "?site=" + siteId, memberEmail: member.email || user.email || "", adminUrl: deps.adminUrl });
     const r = await deps.sendMail({ to: deps.adminEmail, ...mail }).catch((e) => ({ ok: false, error: String(e) }));
     await event(r.ok ? "email_sent" : "email_failed", { template: "adminFirstPublish", ...r.ok ? {} : { error: String(r.error || "").slice(0, 200) } });
-    return reply({ ok: true, status: "pending", version_id: version.id, message: "已送出上線申請。我們確認後會為你開通，並以 Email 通知。" }, 200);
+    return reply({ ok: true, status: "pending", version_id: version.id, message: withNote("已送出上線申請。我們確認後會為你開通，並以 Email 通知。") }, 200);
   }
   if (site.status === "pending") {
     await event("version_saved", { version_id: version.id });
-    return reply({ ok: true, status: "pending", version_id: version.id, message: "已更新送審的內容。網站開通後會使用最新版本。" }, 200);
+    return reply({ ok: true, status: "pending", version_id: version.id, message: withNote("已更新送審的內容。網站開通後會使用最新版本。") }, 200);
   }
   await event("deploy_queued", { version_id: version.id });
   const d = await deps.dispatch({ siteId, versionId: version.id }).catch((e) => ({ ok: false, error: String(e) }));
@@ -751,7 +849,7 @@ async function handlePublish(req, deps) {
     await event("deploy_failed", { message: "無法啟動部署：" + String(d.error || "").slice(0, 200), version_id: version.id });
     return reply({ error: "dispatch_failed", message: "更新沒有送出成功，請稍後再按一次發佈。你的網站仍維持舊版上線。" }, 502);
   }
-  return reply({ ok: true, status: site.status, updating: true, version_id: version.id, message: "更新已送出，約 1–2 分鐘後生效。" }, 200);
+  return reply({ ok: true, status: site.status, updating: true, version_id: version.id, message: withNote("更新已送出，約 1–2 分鐘後生效。") }, 200);
 }
 
 // build/lib/supabase.mjs

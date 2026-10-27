@@ -8,14 +8,15 @@ export const FONT_STACKS = {
   kai: '"LXGW WenKai TC","Kaiti TC","BiauKai","DFKai-SB",serif'
 };
 const RADIUS = { pill: '999px', round: '10px', square: '2px' };
-export function baseCss(c, { headingFont = false, font = 'serif', button = 'pill', fontUrl = '' } = {}) {
+export function baseCss(c, { headingFont = false, font = 'serif', button = 'pill', fontUrl = '', fontFormat = 'woff2' } = {}) {
   const src = headingFont ? '/fonts/heading.woff2' : fontUrl;
+  const fmt = headingFont ? 'woff2' : fontFormat;   // 預覽上傳的 TTF／OTF 時不能標 woff2，否則瀏覽器會略過
   const stack = FONT_STACKS[font] || FONT_STACKS.serif;
   // 等高線紋理：用主色畫的小 SVG（約 0.6 KB），疊在交錯底色區塊的右上角
   const hex = String(c.accent || '#888888').replace('#', '%23');
   const contour = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' fill='none' stroke='" + hex + "' stroke-opacity='.16'%3E%3Cpath d='M400 40c-60 10-90 60-150 50S160 20 90 40 10 120 0 130'/%3E%3Cpath d='M400 90c-50 10-80 55-140 48S170 70 100 90 30 160 0 175'/%3E%3Cpath d='M400 140c-45 12-70 50-130 46S180 120 115 140 45 200 0 220'/%3E%3Cpath d='M400 190c-40 12-62 46-122 44S190 170 130 190 60 240 0 265'/%3E%3Cpath d='M400 240c-35 12-55 42-112 42S200 220 145 240 75 280 0 310'/%3E%3C/svg%3E\")";
   const paper = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
-  return (src ? '@font-face{font-family:"SiteHeading";src:url(' + src + ') format("woff2");font-weight:100 900;font-style:normal;font-display:swap}\n' : '') + `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
+  return (src ? '@font-face{font-family:"SiteHeading";src:url(' + src + ')' + (fmt ? ' format("' + fmt + '")' : '') + ';font-weight:100 900;font-style:normal;font-display:swap}\n' : '') + `:root{--bg:${c.bg};--surface:${c.surface};--text:${c.text};--muted:${c.muted};--accent:${c.accent};--on-accent:${c.onAccent};--line:${c.line};--alt:${c.surface};--alt:color-mix(in srgb,${c.surface} 55%,${c.bg})}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:16px/1.8 -apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC","Microsoft JhengHei","Segoe UI",sans-serif}
@@ -259,5 +260,82 @@ h2.big{font-size:clamp(34px,5.2vw,60px);margin-bottom:24px;letter-spacing:.01em}
 .menu.cards li,.shop-grid li,.review,.faq-item,.gallery figure{transition:transform .2s ease,box-shadow .2s ease}
 .menu.cards li:hover,.shop-grid li:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.10)}
 @media(prefers-reduced-motion:reduce){.menu.cards li:hover,.shop-grid li:hover{transform:none}}
+
+/* ── 嵌入程式碼區塊 ── */
+.embed-block .wrap>*:not(h2){max-width:100%}
+.embed-block iframe{max-width:100%;border:0}
+.embed-ph{padding:28px;border:2px dashed var(--muted);border-radius:16px;color:var(--muted);text-align:center}
+.embed-ph code{display:block;margin-top:10px;font-size:13px;white-space:pre-wrap;word-break:break-all;opacity:.8}
+
+/* ── 預約行事曆 ── */
+.cal-set{border:0;padding:0;margin:0 0 14px}.cal-set legend{font-weight:600;margin-bottom:8px;padding:0}
+.cal-days,.cal-times{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
+.cal-times{flex-wrap:wrap;overflow:visible;margin-top:10px}
+.cal-day,.cal-time{flex:0 0 auto;font:inherit;font-size:15px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:8px 14px;cursor:pointer;white-space:nowrap}
+.alt .cal-day,.alt .cal-time{background:var(--surface)}
+.cal-time{display:flex;flex-direction:column;align-items:center;min-width:84px;line-height:1.4;font-variant-numeric:tabular-nums}
+.cal-time small{font-size:12px;color:var(--muted)}
+.cal-day[aria-pressed=true],.cal-time[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.cal-time[aria-pressed=true] small{color:var(--on-accent)}
+.cal-day:disabled,.cal-time:disabled{cursor:not-allowed;opacity:.5}
+.cal-day[aria-pressed=true]:disabled{opacity:1}
+.cal-pick{font-weight:600;color:var(--accent);margin:8px 0 0}
+
+/* ── 版型風格：置中大字 ── */
+.ly-center .top .wrap{flex-direction:column;justify-content:center;gap:2px;padding-top:12px;padding-bottom:6px}
+.ly-center .top nav{justify-content:center}
+.ly-center .hero .hero-grid{grid-template-columns:1fr;text-align:center;justify-items:center;gap:40px}
+.ly-center .hero h1{font-size:clamp(44px,8vw,88px);letter-spacing:.04em}
+.ly-center .hero .lead{max-width:30em;margin-left:auto;margin-right:auto}
+.ly-center .hero .actions{justify-content:center}
+.ly-center .hero:not(.full) figure{width:100%}
+.ly-center .hero:not(.full) img,.ly-center .hero:not(.full) .ph-img{aspect-ratio:21/9;border-radius:28px}
+.ly-center .sec-title,.ly-center .sec-sub,.ly-center .sec-chip{text-align:center;margin-left:auto;margin-right:auto;display:block;width:fit-content}
+.ly-center.hd-bar .sec-title{border-left:0;padding-left:0;border-bottom:4px solid var(--accent);padding-bottom:8px}
+.ly-center .about:not(.split) p{margin-left:auto;margin-right:auto;text-align:center;max-width:38em}
+.ly-center section>.wrap{max-width:960px}
+
+/* ── 版型風格：方格拼貼 ── */
+.bento{padding:28px 0 40px}
+.bento-grid{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+.bento .b-text,.bento .b-main,.bento .b-info{grid-column:1/-1}
+.bento .b-a img,.bento .b-b img{aspect-ratio:1/1;min-height:0}
+.bento-grid>*{margin:0;border-radius:24px;overflow:hidden;background:var(--surface)}
+.bento .b-text{padding:36px 28px;display:flex;flex-direction:column;justify-content:center}
+.bento .b-text h1{font-size:clamp(36px,5.6vw,64px)}
+.bento figure img,.bento figure .ph-img{width:100%;height:100%;min-height:220px;object-fit:cover;aspect-ratio:auto;border-radius:0;border:0}
+.bento .b-info{padding:24px 26px;background:var(--accent);color:var(--on-accent);display:flex;flex-direction:column;justify-content:center;gap:10px}
+.bento .b-info p{margin:0}
+.ly-bento main>section:not(.hero){margin:14px auto;max-width:1240px;width:calc(100% - 28px);border-radius:28px;background:var(--alt)}
+.ly-bento main>section.alt:not(.hero){background:var(--surface)}
+@media(min-width:900px){
+ .bento-grid{grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:minmax(240px,auto) minmax(220px,auto)}
+ .bento .b-text{grid-column:1;grid-row:1/3;padding:48px 44px}
+ .bento .b-info{grid-column:auto}
+ .bento .b-a img,.bento .b-b img{aspect-ratio:auto;min-height:220px}
+ .bento .b-main{grid-column:2/4}
+ .bento-grid:not(:has(.b-info)) .b-a{grid-column:2/3}.bento-grid:not(:has(.b-info)) .b-b{grid-column:3/4}
+ .bento-grid:has(.b-b) .b-info{grid-column:1/-1;flex-direction:row;justify-content:flex-start;flex-wrap:wrap;gap:12px 56px;padding:20px 44px}
+ .ly-bento section>.wrap:has(>.sec-title){display:grid;grid-template-columns:minmax(200px,280px) 1fr;column-gap:56px;grid-auto-flow:row dense}
+ .ly-bento section>.wrap:has(>.sec-title)>*{grid-column:2}
+ .ly-bento section>.wrap:has(>.sec-title)>.sec-title,.ly-bento section>.wrap:has(>.sec-title)>.sec-sub,.ly-bento section>.wrap:has(>.sec-title)>.sec-chip{grid-column:1}
+ .ly-bento section>.wrap:has(>.sec-title)>.sec-chip{justify-self:start;align-self:start;width:auto}
+ .ly-bento section>.wrap:has(>.sec-title)>.sec-title,.ly-bento section>.wrap:has(>.sec-title)>.sec-sub{align-self:start}
+ .ly-bento .sec-sub{margin-top:0}
+}
+
+/* ── 版型風格：左側選單（電腦版） ── */
+.side-extra{display:none}
+@media(min-width:1000px){
+ .ly-sidebar .top{position:fixed;left:0;top:0;bottom:0;width:248px;border-bottom:0;border-right:1px solid var(--line);background:var(--surface);overflow-y:auto}
+ .ly-sidebar .top .wrap{flex-direction:column;align-items:flex-start;justify-content:flex-start;flex-wrap:nowrap;gap:0;min-height:100%;padding:40px 28px}
+ .ly-sidebar .brand{font-size:24px}
+ .ly-sidebar .top nav{flex-direction:column;gap:2px;margin-top:32px;font-size:16px;width:100%}
+ .ly-sidebar .top nav a{padding:8px 0;border-bottom:1px solid var(--line)}
+ .ly-sidebar .side-extra{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:28px;font-size:14px;color:var(--muted)}
+ .ly-sidebar main,.ly-sidebar footer{margin-left:248px}
+ .ly-sidebar section{scroll-margin-top:0}
+ .ly-sidebar .cart-bar{left:260px}
+}
 `;
 }

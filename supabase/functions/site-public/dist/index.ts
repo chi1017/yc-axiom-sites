@@ -97,11 +97,17 @@ var LIMITS = {
   btnLabel: 16,
   seoTitle: 60,
   seoDesc: 160,
-  sub: 60
+  sub: 60,
+  html: 2e4,
+  code: 2e4,
+  fontName: 40,
+  calRanges: 4,
+  calClosed: 60
 };
 var ORDER_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "blocks", "booking", "visit", "contact"];
 var BLOCK_ID_RE = /^[a-z0-9]{4,12}$/;
-var FONTS = ["serif", "sans", "round", "kai"];
+var FONTS = ["serif", "sans", "round", "kai", "custom"];
+var FONT_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/font-[a-z0-9]{6,20}\.(woff2|woff|ttf|otf)$/;
 var BUTTONS = ["pill", "round", "square"];
 var TEXTURES = ["none", "paper", "dots", "grid", "glow", "contour"];
 var HEAD_STYLES = ["plain", "num", "bar", "chip"];
@@ -112,7 +118,15 @@ var REVIEW_STYLES = ["cards", "quote"];
 var SUB_KEYS = ["about", "video", "menu", "interior", "shop", "reviews", "news", "posts", "faq", "booking", "visit", "contact"];
 var DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 var HERO_STYLES = ["card", "full"];
-var HOME_STYLES = ["standard", "magazine"];
+var HOME_STYLES = ["standard", "magazine", "center", "bento", "sidebar"];
+var SLOT_MINUTES = [15, 20, 30, 45, 60, 90, 120, 180];
+function emptyCal() {
+  const weekly = {};
+  DAYS.forEach((d) => {
+    weekly[d] = [];
+  });
+  return { enabled: false, slotMinutes: 60, capacity: 1, leadHours: 2, maxDays: 30, weekly, closed: [] };
+}
 function emptyHours() {
   const h = {};
   DAYS.forEach((d) => {
@@ -162,8 +176,12 @@ function emptyContent() {
     order: [],
     // 首頁區塊順序（ORDER_KEYS 與 'b:<代碼>'）；空的＝預設順序
     blocks: [],
-    // 自訂圖文區塊 [{ id, title, body, photo, btnLabel, btnUrl, side, hidden }]
-    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards", colors: null },
+    // 自訂區塊 [{ id, kind, title, body, photo, btnLabel, btnUrl, side, hidden, html }]
+    style: { font: "serif", button: "pill", floatLine: false, texture: "none", motion: "rise", head: "plain", menuStyle: "list", gallery: "masonry", reviewStyle: "cards", colors: null, customFont: null },
+    code: { head: "", body: "" },
+    // 全站自訂程式碼（進階方案，需管理員審核）：head＝放在 </head> 前；body＝放在 </body> 前
+    bookingCal: emptyCal(),
+    // 預約行事曆（進階方案）
     subs: {},
     // 各區塊標題下方的一句副標題（選填）
     seo: { title: "", description: "", share: null }
@@ -303,15 +321,18 @@ function normalizeContent(raw) {
     let id = String(o.id || "").toLowerCase();
     if (!BLOCK_ID_RE.test(id) || bids.has(id)) id = "";
     if (id) bids.add(id);
+    const kind = o.kind === "html" ? "html" : "text";
     return {
       id,
+      kind,
       title: line(o.title, LIMITS.blockTitle),
       body: str(o.body, LIMITS.blockBody),
       photo: photo(o.photo),
       btnLabel: line(o.btnLabel, LIMITS.btnLabel),
       btnUrl: clip(safeHttpsUrl(o.btnUrl), 500),
       side: o.side === "left" ? "left" : "right",
-      hidden: o.hidden === true
+      hidden: o.hidden === true,
+      ...kind === "html" ? { html: rawCode(o.html, LIMITS.html) } : {}
     };
   }).filter((b2) => b2.id);
   c.order = normalizeOrder(r.order, c.blocks);
@@ -327,8 +348,13 @@ function normalizeContent(raw) {
     menuStyle: pick(MENU_STYLES, st.menuStyle),
     gallery: pick(GALLERY_STYLES, st.gallery),
     reviewStyle: pick(REVIEW_STYLES, st.reviewStyle),
-    colors: normalizeColors4(st.colors)
+    colors: normalizeColors4(st.colors),
+    customFont: customFontOf(st.customFont)
   };
+  if (c.style.font === "custom" && !c.style.customFont) c.style.font = "serif";
+  const cd = r.code && typeof r.code === "object" ? r.code : {};
+  c.code = { head: rawCode(cd.head, LIMITS.code), body: rawCode(cd.body, LIMITS.code) };
+  c.bookingCal = normalizeCal(r.bookingCal);
   const sb = r.subs && typeof r.subs === "object" ? r.subs : {};
   c.subs = {};
   SUB_KEYS.forEach((k) => {
@@ -337,6 +363,31 @@ function normalizeContent(raw) {
   });
   const so = r.seo && typeof r.seo === "object" ? r.seo : {};
   c.seo = { title: line(so.title, LIMITS.seoTitle), description: line(so.description, LIMITS.seoDesc), share: photo(so.share) };
+  return c;
+}
+function rawCode(v, n) {
+  return clip(String(v == null ? "" : v).replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim(), n);
+}
+function customFontOf(f) {
+  if (!f || typeof f !== "object") return null;
+  const path = String(f.path || "");
+  if (!FONT_PATH_RE.test(path)) return null;
+  return { path, name: line(f.name, LIMITS.fontName) || "自訂字型" };
+}
+var toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+function normalizeCal(raw) {
+  const r = raw && typeof raw === "object" ? raw : {};
+  const c = emptyCal();
+  c.enabled = r.enabled === true;
+  c.slotMinutes = SLOT_MINUTES.includes(Number(r.slotMinutes)) ? Number(r.slotMinutes) : 60;
+  c.capacity = intIn(r.capacity, 1, 50) || 1;
+  c.leadHours = intIn(r.leadHours, 0, 168) ?? 2;
+  c.maxDays = intIn(r.maxDays, 1, 90) || 30;
+  const w = r.weekly && typeof r.weekly === "object" ? r.weekly : {};
+  DAYS.forEach((d) => {
+    c.weekly[d] = arr(w[d]).map((x) => x && typeof x === "object" ? { start: String(x.start || ""), end: String(x.end || "") } : null).filter((x) => x && validTime(x.start) && validTime(x.end) && toMin(x.start) < toMin(x.end)).sort((a, b) => a.start.localeCompare(b.start)).slice(0, LIMITS.calRanges);
+  });
+  c.closed = [...new Set(arr(r.closed).filter(validDate))].sort().slice(0, LIMITS.calClosed);
   return c;
 }
 function normalizeOrder(raw, blocks) {
@@ -542,6 +593,45 @@ function orderMails({ shopName, order, base }) {
   return { owner, buyer };
 }
 
+// templates/shared/slots.js
+var toMin2 = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+var hhmm = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+var addDays2 = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+var dowOf = (d) => DAYS[((/* @__PURE__ */ new Date(d + "T00:00:00Z")).getUTCDay() + 6) % 7];
+function taipeiNow(now) {
+  const t = new Date(now.getTime() + 8 * 3600 * 1e3);
+  return { date: t.toISOString().slice(0, 10), min: t.getUTCHours() * 60 + t.getUTCMinutes() };
+}
+function slotsForDate(cal, date) {
+  if (!cal || !cal.enabled || (cal.closed || []).includes(date)) return [];
+  const out = [];
+  for (const r of cal.weekly[dowOf(date)] || []) {
+    for (let m = toMin2(r.start); m + cal.slotMinutes <= toMin2(r.end); m += cal.slotMinutes) out.push(hhmm(m));
+  }
+  return [...new Set(out)].sort();
+}
+function availability(cal, now, usage = {}) {
+  const { date: today, min } = taipeiNow(now);
+  const lead = (cal.leadHours || 0) * 60;
+  const days = [];
+  for (let i = 0; i <= cal.maxDays; i++) {
+    const date = addDays2(today, i);
+    const slots2 = slotsForDate(cal, date).filter((t) => i * 1440 + toMin2(t) - min >= lead).map((t) => ({ time: t, left: Math.max(0, cal.capacity - (usage[date + " " + t] || 0)) }));
+    if (slots2.length) days.push({ date, slots: slots2 });
+  }
+  return days;
+}
+function checkSlot(cal, date, time, now) {
+  if (!cal || !cal.enabled) return { ok: false, msg: "這個網站目前沒有開放線上選時段預約" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !/^\d{2}:\d{2}$/.test(time || "")) return { ok: false, msg: "請選擇預約日期與時段" };
+  const { date: today, min } = taipeiNow(now);
+  const days = Math.round((Date.parse(date + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5);
+  if (Number.isNaN(days) || days < 0 || days > cal.maxDays) return { ok: false, msg: "這個日期不在可預約的範圍內" };
+  if (!slotsForDate(cal, date).includes(time)) return { ok: false, msg: "這個時段沒有開放預約，請重新選擇" };
+  if (days * 1440 + toMin2(time) - min < (cal.leadHours || 0) * 60) return { ok: false, msg: "這個時段太接近了，請改選較晚的時段" };
+  return { ok: true, msg: "" };
+}
+
 // supabase/functions/site-public/handler.mjs
 var LIMITS2 = { name: 60, contact: 120, message: 2e3, perIpHour: 5, perSiteDay: 100 };
 var LIVE = ["live", "overdue"];
@@ -562,9 +652,9 @@ var page = (title, text2, back) => new Response(
   '<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>' + esc(title) + `</title><body style="font:16px/1.8 -apple-system,BlinkMacSystemFont,'Noto Sans TC',sans-serif;max-width:560px;margin:15vh auto;padding:0 20px"><h1 style="font-size:22px">` + esc(title) + "</h1><p>" + esc(text2) + "</p>" + (back ? '<p><a href="' + esc(back) + '">回到網站</a></p>' : '<p><a href="javascript:history.back()">回上一頁</a></p>') + "</body></html>",
   { status: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
 );
-function shopMessageEmail({ shopName, name, contact: contact2, message, base, kind = "message", when = "" }) {
-  const subject = "「" + shopName + "」" + (kind === "booking" ? "預約申請：" + when + " " : "網站留言：") + name;
-  const intro = kind === "booking" ? "有人透過網站送出預約申請，請與對方聯絡確認（網站不會自動保留時段）：" : "有人透過網站的聯絡表單留言給你：";
+function shopMessageEmail({ shopName, name, contact: contact2, message, base, kind = "message", when = "", held = false }) {
+  const subject = "「" + shopName + "」" + (kind === "booking" ? (held ? "新預約：" : "預約申請：") + when + " " : "網站留言：") + name;
+  const intro = kind === "booking" ? held ? "有人透過預約行事曆預約了這個時段（名額已先保留）。請到會員專區按「確認」或「取消」，客人有留 Email 會收到通知：" : "有人透過網站送出預約申請，請與對方聯絡確認（網站不會自動保留時段）：" : "有人透過網站的聯絡表單留言給你：";
   const text2 = shopName + " 你好，\n\n" + intro + "\n\n姓名：" + name + "\n聯絡方式：" + contact2 + "\n\n" + message + "\n\n" + (EMAIL.test(contact2) ? "直接回覆這封信，就會寄給對方。\n" : "請用對方留下的聯絡方式回覆。\n") + "所有留言也可以在會員專區查看。\n\n網站：" + base;
   const html2 = "<p>" + esc(shopName) + " 你好，</p><p>" + esc(intro) + '</p><table style="border-collapse:collapse"><tr><td style="padding:2px 12px 2px 0;color:#777">姓名</td><td>' + esc(name) + '</td></tr><tr><td style="padding:2px 12px 2px 0;color:#777">聯絡方式</td><td>' + esc(contact2) + '</td></tr></table><p style="white-space:pre-wrap;border-left:3px solid #ccc;padding-left:12px">' + esc(message) + '</p><p style="color:#777;font-size:14px">' + (EMAIL.test(contact2) ? "直接回覆這封信，就會寄給對方。" : "請用對方留下的聯絡方式回覆。") + "所有留言也可以在會員專區查看。</p>";
   return { subject, text: text2, html: html2 };
@@ -573,6 +663,7 @@ async function handlePublic(req, deps) {
   const url = new URL(req.url);
   const route = url.pathname.replace(/\/+$/, "").split("/").pop();
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "content-type" } });
+  if (route === "slots" && req.method === "GET") return slots(url, deps);
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
   if (route === "hit") return hit(req, deps);
   if (route === "shop") return shop(req, deps);
@@ -599,6 +690,31 @@ async function hit(req, deps) {
   });
   return ok;
 }
+async function liveCal(db2, site) {
+  if (site.tier !== "pro") return null;
+  const live = await liveContent(db2, site);
+  if (!live) return null;
+  const c = normalizeContent(live);
+  return c.bookingForm && c.bookingCal.enabled ? { cal: c.bookingCal, content: c } : null;
+}
+async function slots(url, deps) {
+  const headers = { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+  const out = (body) => new Response(JSON.stringify(body), { status: 200, headers });
+  const siteId = url.searchParams.get("site") || "";
+  if (!UUID.test(siteId)) return out({ days: [] });
+  const site = await deps.db.getOne("rental_sites", "id=eq." + siteId + "&select=id,status,tier,live_version_id");
+  if (!site || !LIVE.includes(site.status)) return out({ days: [] });
+  const lc = await liveCal(deps.db, site);
+  if (!lc) return out({ days: [] });
+  const now = (deps.now || (() => /* @__PURE__ */ new Date()))();
+  const today = taipeiNow(now).date;
+  const rows = await deps.db.rpc("rental_slot_usage", { p_site: siteId, p_from: today, p_to: addDays2(today, lc.cal.maxDays) }).catch(() => []);
+  const usage = {};
+  (rows || []).forEach((r) => {
+    usage[r.slot_date + " " + r.slot_time] = Number(r.used) || 0;
+  });
+  return out({ days: availability(lc.cal, now, usage) });
+}
 async function contact(req, deps, kind) {
   let f;
   try {
@@ -610,15 +726,27 @@ async function contact(req, deps, kind) {
   }
   const siteId = f.get("site") || "";
   if (!UUID.test(siteId)) return page("送出失敗", "表單資料不完整，請重新整理網頁後再試。");
-  const site = await deps.db.getOne("rental_sites", "id=eq." + siteId + "&select=id,member_id,status,public_url,custom_domain,domain_status,content,live_version_id");
+  const site = await deps.db.getOne("rental_sites", "id=eq." + siteId + "&select=id,member_id,status,tier,public_url,custom_domain,domain_status,content,live_version_id");
   if (!site || !LIVE.includes(site.status)) return page("送出失敗", "這個網站目前無法接收留言。");
   const base = siteBase(site);
   const thanks = base ? base + "thanks/" : "";
   if (f.get("website")) return thanks ? Response.redirect(thanks, 303) : page("已送出", "謝謝你的留言。");
   const now = (deps.now || (() => /* @__PURE__ */ new Date()))();
   const name = clean(f.get("name"), LIMITS2.name), contactV = clean(f.get("contact"), LIMITS2.contact);
-  let message = clean(f.get("message"), LIMITS2.message), meta = null, when = "";
-  if (kind === "booking") {
+  let message = clean(f.get("message"), LIMITS2.message), meta = null, when = "", slot = null;
+  if (kind === "booking" && f.get("cal") === "1") {
+    const lc = await liveCal(deps.db, site);
+    if (!lc) return page("無法預約", "這個網站目前沒有開放線上選時段預約，請用電話與店家聯絡。", base);
+    const date = clean(f.get("date"), 10), time = clean(f.get("time"), 5);
+    const chk = checkSlot(lc.cal, date, time, now);
+    if (!chk.ok) return page("預約時段需要調整", chk.msg + "。", base);
+    const people = Math.max(0, Math.min(50, parseInt(f.get("people") || "0", 10) || 0)), item = clean(f.get("item"), 60), email = clean(f.get("email"), 120);
+    if (email && !EMAIL.test(email)) return page("Email 格式不正確", "請檢查 Email 後再送出，或把 Email 欄留空。", base);
+    when = date.replace(/-/g, "/") + " " + time;
+    slot = { date, time, capacity: lc.cal.capacity };
+    meta = { date, time, cal: true, ...people ? { people } : {}, ...item ? { item } : {}, ...email ? { email } : {} };
+    message = "預約：" + when + (people ? "・" + people + " 人" : "") + (item ? "・" + item : "") + (email ? "\nEmail：" + email : "") + (message ? "\n備註：" + message : "");
+  } else if (kind === "booking") {
     const date = clean(f.get("date"), 10), time = clean(f.get("time"), 5);
     const people = Math.max(0, Math.min(50, parseInt(f.get("people") || "0", 10) || 0)), item = clean(f.get("item"), 60);
     const today = new Date(now.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
@@ -648,11 +776,16 @@ async function contact(req, deps, kind) {
       message += "\n訂金：NT$ " + amount + "（付款完成會另外通知）";
     }
   }
-  const row = await deps.db.insertReturning("site_messages", { site_id: siteId, name, contact: contactV, message, ip_hash: ipHash, kind, ...meta ? { meta } : {} });
+  let row;
+  if (slot) {
+    const id = await deps.db.rpc("rental_book_slot", { p_site: siteId, p_date: slot.date, p_time: slot.time, p_capacity: slot.capacity, p_name: name, p_contact: contactV, p_message: message, p_ip_hash: ipHash, p_meta: meta });
+    if (!id) return page("這個時段剛好額滿了", "很抱歉，你選的時段在送出前被預約滿了。請回到網站重新選擇其他時段。", base ? base + "#booking" : base);
+    row = { id };
+  } else row = await deps.db.insertReturning("site_messages", { site_id: siteId, name, contact: contactV, message, ip_hash: ipHash, kind, ...meta ? { meta } : {} });
   const owner = await deps.db.getOne("members", "id=eq." + site.member_id + "&select=email");
   if (owner && owner.email && deps.sendMail) {
     const shopName = site.content && site.content.name || "你的網站";
-    const m = shopMessageEmail({ shopName, name, contact: contactV, message, base, kind, when });
+    const m = shopMessageEmail({ shopName, name, contact: contactV, message, base, kind, when, held: !!slot });
     const r = await deps.sendMail({ to: owner.email, ...m, ...EMAIL.test(contactV) ? { replyTo: contactV } : {} }).catch(() => ({ ok: false }));
     if (r && r.ok && row && row.id) await deps.db.patch("site_messages", "id=eq." + row.id, { emailed: true }).catch(() => {
     });
@@ -716,7 +849,7 @@ async function shop(req, deps) {
   }
   const siteId = f.get("site") || "";
   if (!UUID.test(siteId)) return page("送出失敗", "訂購單資料不完整，請重新整理網頁後再試。");
-  const site = await deps.db.getOne("rental_sites", "id=eq." + siteId + "&select=id,member_id,status,public_url,custom_domain,domain_status,content,live_version_id");
+  const site = await deps.db.getOne("rental_sites", "id=eq." + siteId + "&select=id,member_id,status,tier,public_url,custom_domain,domain_status,content,live_version_id");
   if (!site || !LIVE.includes(site.status)) return page("送出失敗", "這個網站目前無法線上購買。");
   const base = siteBase(site);
   if (f.get("website")) return base ? Response.redirect(base + "order/", 303) : page("已送出", "謝謝。");

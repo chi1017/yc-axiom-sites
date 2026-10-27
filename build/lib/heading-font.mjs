@@ -23,8 +23,11 @@ export function headingText(files) {
   return [...chars].sort().join('');
 }
 
-export async function buildHeadingFont(files, font = 'serif') {
+// srcBuf：店家上傳的字型（TTF／OTF／WOFF／WOFF2）；沒有時用內建字型
+export async function buildHeadingFont(files, font = 'serif', srcBuf = null) {
   const text = headingText(files);
   if (!text) return null;
-  return subsetFont(readFileSync(srcOf(font)), text, { targetFormat: 'woff2' });
+  const out = await subsetFont(srcBuf || readFileSync(srcOf(font === 'custom' ? 'serif' : font)), text, { targetFormat: 'woff2' });
+  if (!out || !out.length) throw new Error('字型裡沒有標題用到的字');
+  return out;
 }

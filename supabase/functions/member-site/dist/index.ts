@@ -154,8 +154,36 @@ var MERCHANT_RE = /^\d{7,10}$/;
 var KEY_RE = /^[A-Za-z0-9]{16}$/;
 var PAY_MODES = ["off", "test", "live"];
 
+// supabase/functions/_shared/emails.mjs
+var esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var CONTACT = { line: "@788cblaq", email: "ycaxiom@gmail.com" };
+function layout(title, bodyHtml) {
+  return `<!doctype html><html lang="zh-Hant"><body style="margin:0;background:#f5f4f0;font-family:-apple-system,BlinkMacSystemFont,'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#222"><div style="max-width:560px;margin:0 auto;padding:24px 16px"><div style="background:#fff;border-radius:10px;padding:24px 26px;line-height:1.7;font-size:15px"><h2 style="margin:0 0 14px;font-size:18px">` + esc(title) + "</h2>" + bodyHtml + '</div><p style="color:#888;font-size:12px;text-align:center;margin:14px 0 0">YC AXIOM 網站租用 · LINE ' + CONTACT.line + " · " + CONTACT.email + "</p></div></body></html>";
+}
+var ADD_CONTACT = "為避免我們的信件被歸到垃圾信匣，請把 " + CONTACT.email + " 加入你的聯絡人；直接回覆這封信也會寄到我們的信箱。";
+var button = (href, label) => '<p><a href="' + esc(href) + '" style="display:inline-block;background:#2f4a3a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">' + esc(label) + "</a></p>";
+var LINE_HINT = "有任何問題都可以直接回覆這封信，或用 LINE " + CONTACT.line + " 聯絡我們。";
+function guestBookingResult({ shopName, when, confirmed, note, base }) {
+  const subject = "【" + shopName + "】你的預約" + (confirmed ? "已確認" : "已取消") + "：" + when;
+  const msg = confirmed ? "你在 " + shopName + " 的預約已經確認：" + when + "。期待你的光臨！" : "很抱歉，你在 " + shopName + " 的預約（" + when + "）已經取消。";
+  const html = "<p>" + esc(msg) + "</p>" + (note ? "<p>店家說明：" + esc(note) + "</p>" : "") + '<p style="color:#777;font-size:14px">需要更改，請直接回覆這封信，會寄給店家。' + (base ? "網站：" + esc(base) : "") + "</p>";
+  const text = [msg, note ? "店家說明：" + note : "", "需要更改請直接回覆這封信。"].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+function collabInvite({ shopName, inviter, dashboardUrl }) {
+  const subject = "【YC AXIOM】" + (inviter || "網站擁有者") + " 邀請你一起編輯「" + shopName + "」的網站";
+  const html = layout(
+    "你被邀請一起編輯網站",
+    "<p>" + esc(inviter || "網站擁有者") + " 邀請你一起編輯「" + esc(shopName) + "」的網站。</p><p>請用收到這封信的 Email 登入（或註冊）YC AXIOM 會員專區，登入後就會在「我的網站」看到這個網站。</p>" + (dashboardUrl ? button(dashboardUrl, "前往會員專區") : "") + '<p style="color:#666;font-size:13px">協作者可以編輯內容、發佈更新、處理預約；收款設定、網域與刪除網站只有擁有者能操作。</p>'
+  );
+  const text = [(inviter || "網站擁有者") + " 邀請你一起編輯「" + shopName + "」的網站。", "請用這個 Email 登入 YC AXIOM 會員專區，登入後就會看到這個網站。", dashboardUrl].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
 // supabase/functions/member-site/handler.mjs
-var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site"];
+var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site", "set_booking", "invite_collab", "remove_collab", "accept_invites"];
+var MAX_COLLABS = 5;
+var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 var DELETABLE = ["draft", "pending"];
 async function handleMember(req, deps) {
   const cors = corsHeaders(req, deps.allowedOrigins);
@@ -176,12 +204,20 @@ async function handleMember(req, deps) {
     return reply({ error: "bad_request", message: "請求格式不正確" }, 400);
   }
   if (!body || typeof body !== "object" || !ACTIONS.includes(body.action)) return reply({ error: "bad_request", message: "不支援的動作" }, 400);
-  if (typeof body.site_id !== "string" || !UUID.test(body.site_id)) return reply({ error: "bad_request", message: "缺少網站編號" }, 400);
   const { db: db2 } = deps;
-  const siteId = body.site_id;
-  const site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
-  if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
   const fail = (error, message, status = 400) => reply({ error, message }, status);
+  if (body.action === "accept_invites") return acceptInvites(user, deps, reply);
+  if (typeof body.site_id !== "string" || !UUID.test(body.site_id)) return reply({ error: "bad_request", message: "缺少網站編號" }, 400);
+  const siteId = body.site_id;
+  let site = await db2.getOne("rental_sites", "id=eq." + siteId + "&member_id=eq." + user.id + "&select=*");
+  if (!site && body.action === "set_booking") {
+    const cm = await db2.getOne("site_members", "site_id=eq." + siteId + "&member_id=eq." + user.id + "&status=eq.active&select=site_id");
+    const s2 = cm ? await db2.getOne("rental_sites", "id=eq." + siteId + "&select=*") : null;
+    if (s2 && s2.tier === "pro") site = s2;
+  }
+  if (!site) return reply({ error: "not_found", message: "找不到這個網站" }, 404);
+  if (body.action === "set_booking") return setBooking(body, site, user, deps, reply, fail);
+  if (body.action === "invite_collab" || body.action === "remove_collab") return collabAction(body, site, user, deps, reply, fail);
   if (["get_pay", "set_pay", "order_done"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === "delete_site") {
     if (!DELETABLE.includes(site.status) || site.first_published_at) return fail("not_allowed", "已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止", 409);
@@ -246,6 +282,70 @@ async function payAction(body, site, user, deps, reply, fail) {
   const after = await db2.getOne("site_pay_settings", "site_id=eq." + site.id + "&select=site_id,mode,merchant_id,key_enc,iv_enc,updated_at");
   const msg = mode === "off" ? "已關閉線上收款。" : mode === "test" ? "已開啟測試模式：可以用綠界測試卡號下單，不會真的收款。" : "已開啟正式收款，款項會進到你的綠界帳戶。建議先自己下一筆小額訂單確認。";
   return reply({ ok: true, ...view(after), message: msg + (warning ? " " + warning : ""), ...warning ? { warning } : {} }, 200);
+}
+async function setBooking(body, site, user, deps, reply, fail) {
+  const { db: db2 } = deps;
+  const id = String(body.message_id || "");
+  if (!UUID.test(id)) return fail("bad_request", "缺少預約編號");
+  const status = body.status === "confirmed" ? "confirmed" : body.status === "cancelled" ? "cancelled" : "";
+  if (!status) return fail("bad_request", "狀態只能是確認或取消");
+  const note = body.note == null ? "" : String(body.note).trim();
+  if (note.length > 200) return fail("bad_request", "說明最長 200 字");
+  const msg = await db2.getOne("site_messages", "id=eq." + id + "&site_id=eq." + site.id + "&select=id,slot_date,slot_time,slot_status,meta");
+  if (!msg || !msg.slot_date) return fail("not_found", "找不到這筆預約", 404);
+  if (msg.slot_status === status) return reply({ ok: true, status, message: "狀態沒有變更。" }, 200);
+  if (msg.slot_status === "cancelled") return fail("not_allowed", "已取消的預約不能再改，請請客人重新預約", 409);
+  await db2.patch("site_messages", "id=eq." + id, { slot_status: status, meta: { ...msg.meta || {}, handled_by: user.email || user.id, ...note ? { owner_note: note } : {} } });
+  const email = msg.meta && msg.meta.email;
+  let mailed = false;
+  if (email && EMAIL_RE.test(email) && deps.sendMail) {
+    const shopName = site.content && site.content.name || "店家";
+    const when = String(msg.slot_date).replace(/-/g, "/") + " " + msg.slot_time;
+    const owner = await db2.getOne("members", "id=eq." + site.member_id + "&select=email");
+    const r = await deps.sendMail({ to: email, ...guestBookingResult({ shopName, when, confirmed: status === "confirmed", note, base: site.public_url || "" }), ...owner && owner.email ? { replyTo: owner.email } : {} }).catch(() => null);
+    mailed = !!(r && r.ok);
+  }
+  return reply({ ok: true, status, mailed, message: (status === "confirmed" ? "已確認預約。" : "已取消預約，名額已釋出。") + (mailed ? "已寄信通知客人。" : email ? "通知信沒有寄出，請自行聯絡客人。" : "客人沒有留 Email，請用電話聯絡。") }, 200);
+}
+async function collabAction(body, site, user, deps, reply, fail) {
+  const { db: db2 } = deps;
+  const email = String(body.email || "").trim().toLowerCase();
+  if (!EMAIL_RE.test(email) || email.length > 120) return fail("bad_request", "請輸入正確的 Email");
+  const by = "member:" + (user.email || user.id);
+  if (body.action === "remove_collab") {
+    const r = await db2.patchReturning("site_members", "site_id=eq." + site.id + "&email=eq." + encodeURIComponent(email), { status: "removed", member_id: null });
+    if (!r.length) return fail("not_found", "找不到這位協作者", 404);
+    await db2.insert("site_events", { site_id: site.id, type: "collab_removed", detail: { email, by } }).catch(() => {
+    });
+    return reply({ ok: true, message: "已移除 " + email + "。" }, 200);
+  }
+  if (site.tier !== "pro") return fail("not_allowed", "多人協作是進階方案功能，請用 LINE（@788cblaq）聯絡我們升級", 403);
+  if (email === String(user.email || "").toLowerCase()) return fail("bad_request", "不能邀請自己");
+  const list = await db2.list("site_members", "site_id=eq." + site.id + "&status=neq.removed&select=email");
+  if (list.some((x) => x.email === email)) return fail("bad_request", "這個 Email 已經邀請過了");
+  if (list.length >= MAX_COLLABS) return fail("not_allowed", "每個網站最多 " + MAX_COLLABS + " 位協作者", 409);
+  const old = await db2.getOne("site_members", "site_id=eq." + site.id + "&email=eq." + encodeURIComponent(email) + "&select=email");
+  const now = (deps.now || (() => /* @__PURE__ */ new Date()))().toISOString();
+  if (old) await db2.patch("site_members", "site_id=eq." + site.id + "&email=eq." + encodeURIComponent(email), { status: "invited", member_id: null, invited_by: user.id, created_at: now, accepted_at: null });
+  else await db2.insert("site_members", { site_id: site.id, email, status: "invited", invited_by: user.id });
+  await db2.insert("site_events", { site_id: site.id, type: "collab_invited", detail: { email, by } }).catch(() => {
+  });
+  let mailed = false;
+  if (deps.sendMail) {
+    const r = await deps.sendMail({ to: email, ...collabInvite({ shopName: site.content && site.content.name || site.slug, inviter: user.email || "", dashboardUrl: deps.dashboardUrl || "" }) }).catch(() => null);
+    mailed = !!(r && r.ok);
+  }
+  return reply({ ok: true, message: "已邀請 " + email + "。" + (mailed ? "對方會收到邀請信，" : "") + "對方用這個 Email 登入會員專區後就能一起編輯。" }, 200);
+}
+async function acceptInvites(user, deps, reply) {
+  const { db: db2 } = deps;
+  const email = String(user.email || "").trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) return reply({ ok: true, accepted: 0 }, 200);
+  const now = (deps.now || (() => /* @__PURE__ */ new Date()))().toISOString();
+  const r = await db2.patchReturning("site_members", "email=eq." + encodeURIComponent(email) + "&status=eq.invited", { status: "active", member_id: user.id, accepted_at: now });
+  for (const x of r) await db2.insert("site_events", { site_id: x.site_id, type: "collab_joined", detail: { email, by: "member:" + email } }).catch(() => {
+  });
+  return reply({ ok: true, accepted: r.length }, 200);
 }
 
 // build/lib/supabase.mjs
@@ -406,6 +506,27 @@ function makeDispatcher({ token, repo, ref = "main", fetchImpl = fetch }) {
   };
 }
 
+// supabase/functions/_shared/brevo.mjs
+var SENDER = { name: "YC AXIOM 網站租用", email: "ycaxiom@gmail.com" };
+function makeBrevoSender({ apiKey, fetchImpl = fetch, timeoutMs = 1e4 }) {
+  return async function sendMail2(m) {
+    if (!apiKey) return { ok: false, error: "BREVO_API_KEY 未設定" };
+    if (!m || !m.to) return { ok: false, error: "沒有收件人" };
+    try {
+      const res = await fetchImpl("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: { "api-key": apiKey, "Content-Type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ sender: SENDER, replyTo: { email: m.replyTo || SENDER.email }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      if (res.ok) return { ok: true };
+      return { ok: false, error: "brevo " + res.status + " " + String(await res.text()).slice(0, 200) };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e).slice(0, 200) };
+    }
+  };
+}
+
 // supabase/functions/member-site/main.mjs
 var need = (k) => {
   const v = Deno.env.get(k);
@@ -420,4 +541,6 @@ var dispatch = makeDispatcher({ token: Deno.env.get("GITHUB_DISPATCH_TOKEN") || 
 var CF_TOKEN = Deno.env.get("CLOUDFLARE_API_TOKEN") || "";
 var CF_ACCOUNT = Deno.env.get("CLOUDFLARE_ACCOUNT_ID") || "";
 var cf = CF_TOKEN && CF_ACCOUNT ? makeCloudflare({ token: CF_TOKEN, accountId: CF_ACCOUNT }) : void 0;
-Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf, paySecret: Deno.env.get("PAY_SECRET") || SERVICE }));
+var sendMail = makeBrevoSender({ apiKey: Deno.env.get("BREVO_API_KEY") || "" });
+var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
+Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf, sendMail, dashboardUrl: SITE_BASE + "dashboard/", paySecret: Deno.env.get("PAY_SECRET") || SERVICE }));

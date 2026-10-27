@@ -2,7 +2,8 @@
 import { normalizeContent, normalizePalette, normalizeSections } from '../../../templates/shared/content.js';
 import { validateForPublish } from '../../../templates/shared/validate.js';
 import { normalizeLayout, normalizePages } from '../../../templates/shared/pages.js';
-import { adminFirstPublish } from '../_shared/emails.mjs';
+import { adminFirstPublish, adminCodeReview } from '../_shared/emails.mjs';
+import { hasCustomCode, codeHash } from '../../../templates/shared/code.js';
 
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
 export { corsHeaders, parseOrigins };
@@ -39,7 +40,13 @@ export async function handlePublish(req, deps) {
 
   const { db } = deps;
   const now = (deps.now || (() => new Date()))();
-  const site = await db.getOne('rental_sites', 'id=eq.' + siteId + '&member_id=eq.' + user.id + '&select=*');
+  let site = await db.getOne('rental_sites', 'id=eq.' + siteId + '&member_id=eq.' + user.id + '&select=*');
+  // 協作者（進階方案、已接受邀請）也可以發佈
+  if (!site) {
+    const cm = await db.getOne('site_members', 'site_id=eq.' + siteId + '&member_id=eq.' + user.id + '&status=eq.active&select=site_id');
+    const s2 = cm ? await db.getOne('rental_sites', 'id=eq.' + siteId + '&select=*') : null;
+    if (s2 && s2.tier === 'pro') site = s2;
+  }
   if (!site) return reply({ error: 'not_found', message: '找不到這個網站' }, 404);
   const member = await db.getOne('members', 'id=eq.' + user.id + '&select=consented_at,email');
   if (!member || !member.consented_at) return reply({ error: 'consent_required', message: '請先同意服務條款與隱私權政策' }, 403);
@@ -65,17 +72,34 @@ export async function handlePublish(req, deps) {
   if (!version || !version.id) return reply({ error: 'server_error', message: '儲存版本失敗，請稍後再試' }, 500);
   const event = (type, detail) => db.insert('site_events', { site_id: siteId, type, detail }).catch(() => {});
 
+  // 進階方案的自訂程式碼：新的程式碼要管理員審核（核准前網站照常更新，只是不含程式碼）
+  let codeNote = '';
+  if (site.tier === 'pro' && hasCustomCode(content)) {
+    const hash = await codeHash(content);
+    const rv = await db.getOne('site_code_reviews', 'site_id=eq.' + siteId + '&hash=eq.' + hash + '&select=status');
+    if (!rv) {
+      await db.insert('site_code_reviews', { site_id: siteId, hash, status: 'pending', version_id: version.id });
+      await event('code_review_requested', { version_id: version.id });
+      const mail = adminCodeReview({ shopName: content.name, slug: site.slug, memberEmail: member.email || user.email || '', adminUrl: deps.adminUrl });
+      await deps.sendMail({ to: deps.adminEmail, ...mail }).catch(() => null);
+    }
+    const st = rv ? rv.status : 'pending';
+    if (st === 'pending') codeNote = '自訂程式碼需要審核，核准後會自動放進網站。';
+    else if (st === 'rejected') codeNote = '這段自訂程式碼沒有通過審核，不會放進網站。';
+  }
+  const withNote = (msg) => (codeNote ? msg + codeNote : msg);
+
   if (site.status === 'draft') {
     await db.patch('rental_sites', 'id=eq.' + siteId + '&status=eq.draft', { status: 'pending' });
     await event('published_first', { version_id: version.id });
     const mail = adminFirstPublish({ shopName: content.name, slug: site.slug, previewUrl: deps.previewBase + '?site=' + siteId, memberEmail: member.email || user.email || '', adminUrl: deps.adminUrl });
     const r = await deps.sendMail({ to: deps.adminEmail, ...mail }).catch((e) => ({ ok: false, error: String(e) }));
     await event(r.ok ? 'email_sent' : 'email_failed', { template: 'adminFirstPublish', ...(r.ok ? {} : { error: String(r.error || '').slice(0, 200) }) });
-    return reply({ ok: true, status: 'pending', version_id: version.id, message: '已送出上線申請。我們確認後會為你開通，並以 Email 通知。' }, 200);
+    return reply({ ok: true, status: 'pending', version_id: version.id, message: withNote('已送出上線申請。我們確認後會為你開通，並以 Email 通知。') }, 200);
   }
   if (site.status === 'pending') {
     await event('version_saved', { version_id: version.id });
-    return reply({ ok: true, status: 'pending', version_id: version.id, message: '已更新送審的內容。網站開通後會使用最新版本。' }, 200);
+    return reply({ ok: true, status: 'pending', version_id: version.id, message: withNote('已更新送審的內容。網站開通後會使用最新版本。') }, 200);
   }
   // live / overdue：排入部署
   await event('deploy_queued', { version_id: version.id });
@@ -84,5 +108,5 @@ export async function handlePublish(req, deps) {
     await event('deploy_failed', { message: '無法啟動部署：' + String(d.error || '').slice(0, 200), version_id: version.id });
     return reply({ error: 'dispatch_failed', message: '更新沒有送出成功，請稍後再按一次發佈。你的網站仍維持舊版上線。' }, 502);
   }
-  return reply({ ok: true, status: site.status, updating: true, version_id: version.id, message: '更新已送出，約 1–2 分鐘後生效。' }, 200);
+  return reply({ ok: true, status: site.status, updating: true, version_id: version.id, message: withNote('更新已送出，約 1–2 分鐘後生效。') }, 200);
 }
