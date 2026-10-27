@@ -42,6 +42,15 @@ function customerCodeResult({ shopName, approved, note }) {
   const text = [msg, note ? "說明：" + note : "", approved ? "" : "可以在編輯器修改後重新發佈，我們會再審核一次。"].filter(Boolean).join("\n");
   return { subject, html, text };
 }
+function customerProDone({ shopName, amount }) {
+  const subject = "【YC AXIOM】進階功能已開通：" + shopName;
+  const html = layout(
+    "進階功能已開通",
+    "<p>" + (amount ? "我們已收到 " + esc(shopName) + " 的進階功能差額 NT$ " + esc(Number(amount).toLocaleString("en-US")) + "，" : esc(shopName) + " 的") + '預約行事曆、自訂程式碼與多人協作已經開通。</p><p>在編輯器設定後按「發佈」就會出現在網站上；自訂程式碼需要我們審核後才會放進網站。</p><p style="color:#666;font-size:13px">' + esc(ADD_CONTACT) + "</p>"
+  );
+  const text = [shopName + " 的進階功能（預約行事曆、自訂程式碼、多人協作）已經開通。", "在編輯器設定後按「發佈」就會出現在網站上；自訂程式碼需要審核後才會放進網站。"].join("\n");
+  return { subject, html, text };
+}
 function customerUpgradeDone({ shopName, amount, nextPrice }) {
   const subject = "【YC AXIOM】已收到升級差額，多頁版上線中：" + shopName;
   const html = layout(
@@ -178,6 +187,20 @@ async function applyPayment({ db: db2, site, siteId, amount, months, method, ref
   const newStatus = to >= today ? "live" : "overdue";
   const patch = { paid_until: to };
   let needDeploy = false;
+  const downgraded = [];
+  if (site.status !== "pending" && site.next_layout === "single" && site.layout === "multi") {
+    const pg = site.pages || {};
+    Object.assign(patch, { layout: "single", next_layout: null, sections: { ...site.sections || {}, ...Object.fromEntries(["menu", "interior", "faq", "news"].filter((k) => typeof pg[k] === "boolean").map((k) => [k, pg[k]])) } });
+    downgraded.push("layout");
+  }
+  if (site.status !== "pending" && site.next_tier === "basic" && site.tier === "pro") {
+    Object.assign(patch, { tier: "basic", next_tier: null });
+    downgraded.push("tier");
+  }
+  if (downgraded.length && ["live", "overdue"].includes(site.status)) {
+    needDeploy = true;
+    deployVersionId = site.live_version_id || (await latestVersion() || {}).id || null;
+  }
   if (site.status !== newStatus) patch.status = newStatus;
   if (site.status === "suspended") {
     patch.suspended_at = null;
@@ -195,6 +218,7 @@ async function applyPayment({ db: db2, site, siteId, amount, months, method, ref
   const statusFrom = site.status;
   Object.assign(site, patch);
   await event("payment_confirmed", { payment_id: pay.id, amount, months, ...method !== "bank_transfer" ? { method } : {}, period_from: from, period_to: to, status_from: statusFrom, status_to: site.status });
+  if (downgraded.length) await event("plan_downgraded", { layout: downgraded.includes("layout") ? "single" : void 0, tier: downgraded.includes("tier") ? "basic" : void 0 });
   let warning = "";
   if (needDeploy) {
     if (!deployVersionId) warning = "找不到可部署的版本，請請客戶按一次發佈。";
@@ -215,7 +239,7 @@ async function applyPayment({ db: db2, site, siteId, amount, months, method, ref
 // supabase/functions/admin-site/handler.mjs
 var MAX_MONTHS = 60;
 var MAX_AMOUNT = 1e7;
-var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain", "set_tier", "review_code", "confirm_upgrade"];
+var ACTIONS = ["confirm_payment", "republish", "suspend", "restore", "terminate", "purge", "restore_version", "set_domain", "check_domain", "clear_domain", "set_tier", "review_code", "confirm_upgrade", "confirm_pro", "set_next"];
 var PHOTO_BUCKET = "site-photos";
 function taipeiDate(d) {
   return new Date(d.getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
@@ -389,11 +413,37 @@ async function handleAdmin(req, deps) {
       }
       return reply({ ok: true, message: "已確認。網站恢復上線時會使用多頁版。" }, 200);
     }
+    // 確認收到進階功能的差額：開通進階功能，上線中的網站重新部署
+    case "confirm_pro": {
+      if (!site.pro_pending) return fail("not_allowed", "這個網站沒有待補差額的進階功能申請", 409);
+      const reference = body.reference == null ? "" : String(body.reference).trim();
+      if (reference.length > 100) return fail("bad_request", "匯款備註最長 100 字");
+      const waived = body.waived === true;
+      await db2.patch("rental_sites", "id=eq." + siteId, { tier: "pro", pro_pending: false });
+      await event("pro_paid", { amount: waived ? 0 : site.pro_amount || 0, reference, ...waived ? { waived: true } : {} });
+      const member = await db2.getOne("members", "id=eq." + site.member_id + "&select=email");
+      if (member && member.email && deps.sendMail) await deps.sendMail({ to: member.email, ...customerProDone({ shopName: site.content && site.content.name || site.slug, amount: waived ? 0 : site.pro_amount }) }).catch(() => null);
+      if (["live", "overdue"].includes(site.status) && site.live_version_id) {
+        const d = await queueDeploy({ versionId: site.live_version_id });
+        return reply({ ok: true, message: "已開通進階功能，網站重新部署中。", ...d.ok ? {} : { warning: deployWarn } }, 200);
+      }
+      return reply({ ok: true, message: "已開通進階功能。" }, 200);
+    }
+    // 下一期改方案（管理員代為設定或取消）
+    case "set_next": {
+      const patch = {};
+      if ("next_layout" in body) patch.next_layout = body.next_layout === "single" && site.layout === "multi" ? "single" : null;
+      if ("next_tier" in body) patch.next_tier = body.next_tier === "basic" && site.tier === "pro" ? "basic" : null;
+      if (!Object.keys(patch).length) return fail("bad_request", "沒有要變更的項目");
+      await db2.patch("rental_sites", "id=eq." + siteId, patch);
+      await event("next_plan_set", patch);
+      return reply({ ok: true, message: "已更新下一期的方案設定。" }, 200);
+    }
     // 方案：basic／pro。降回一般方案時，上線中的網站會重新部署（拿掉程式碼與預約行事曆）
     case "set_tier": {
       if (!["basic", "pro"].includes(body.tier)) return fail("bad_request", "方案只能是 basic 或 pro");
       if (body.tier === site.tier) return reply({ ok: true, message: "方案沒有變更。" }, 200);
-      await db2.patch("rental_sites", "id=eq." + siteId, { tier: body.tier });
+      await db2.patch("rental_sites", "id=eq." + siteId, { tier: body.tier, pro_pending: false, next_tier: null });
       await event("tier_changed", { from: site.tier || "basic", to: body.tier });
       if (["live", "overdue"].includes(site.status) && site.live_version_id) {
         const d = await queueDeploy({ versionId: site.live_version_id });

@@ -7,9 +7,10 @@
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
 import { taipeiDate, isDateStr, addDays, diffDays, weekdayOf, firstOfMonth, prevMonthFirst } from '../_shared/dates.mjs';
 import { customerReminder, customerOverdue, customerSuspended, adminSiteAlert, adminWeeklySummary } from '../_shared/emails.mjs';
-import { planFor, priceFor } from '../_shared/plans.mjs';
+import { planFor, priceFor, monthlyOf, PRO_ADDON } from '../_shared/plans.mjs';
 // 提醒信上的續約費用（依網站目前的版型）
-export const renewText = (layout) => { const p = planFor(layout); return 'NT$ ' + p.monthly.toLocaleString('en-US') + '／月（' + p.name + '）；一次付 12 個月 NT$ ' + priceFor(layout, 12).toLocaleString('en-US'); };
+// 下一期有申請降級（next_layout／next_tier）時，用降級後的價格
+export const renewText = (site) => { const layout = site.next_layout || site.layout, tier = site.next_tier || site.tier || 'basic'; return 'NT$ ' + monthlyOf(layout, tier).toLocaleString('en-US') + '／月（' + planFor(layout).name + (tier === 'pro' ? '＋' + PRO_ADDON.name : '') + '）；一次付 12 個月 NT$ ' + priceFor(layout, 12, tier).toLocaleString('en-US'); };
 export { parseOrigins };
 
 export const REMINDER_DAYS = 7;       // 到期前幾天（含）開始提醒
@@ -67,7 +68,7 @@ function safeEqual(a, b) {
   return r === 0;
 }
 
-const SITE_COLS = 'id,member_id,slug,status,layout,paid_until,suspended_at,suspend_reason,reminder_sent_for,overdue_notified_for,suspend_notified_for,cf_project_name,public_url,shop_name:content->>name';
+const SITE_COLS = 'id,member_id,slug,status,layout,tier,next_layout,next_tier,paid_until,suspended_at,suspend_reason,reminder_sent_for,overdue_notified_for,suspend_notified_for,cf_project_name,public_url,shop_name:content->>name';
 const shopOf = (s) => s.shop_name || s.slug;
 const enc = encodeURIComponent;
 
@@ -203,7 +204,7 @@ async function runRule(ctx, p) {
         claimQuery: 'id=eq.' + site.id + '&status=eq.live&paid_until=eq.' + pu + '&or=(reminder_sent_for.is.null,reminder_sent_for.neq.' + pu + ')',
         claimBody: { reminder_sent_for: pu }, releaseBody: { reminder_sent_for: null },
         to: await memberEmail(), template: 'customerReminder',
-        build: () => customerReminder({ shopName: shopOf(site), paidUntil: pu, daysLeft: p.daysLeft, dashboardUrl: dash, priceText: renewText(site.layout) })
+        build: () => customerReminder({ shopName: shopOf(site), paidUntil: pu, daysLeft: p.daysLeft, dashboardUrl: dash, priceText: renewText(site) })
       });
       if (s === 'sent') await event('reminder_sent', { paid_until: pu, days_left: p.daysLeft });
       return { outcome: s === 'failed' ? 'failed' : s === 'skipped' ? 'skipped' : 'done', note: mailNote(s) };

@@ -20,6 +20,15 @@ export async function applyPayment({ db, site, siteId, amount, months, method, r
   const newStatus = to >= today ? 'live' : 'overdue';
   const patch = { paid_until: to };
   let needDeploy = false;
+  // 續約時套用客戶申請的降級（多頁 → 一頁、取消進階功能）；內容保留，網站重新部署
+  const downgraded = [];
+  if (site.status !== 'pending' && site.next_layout === 'single' && site.layout === 'multi') {
+    const pg = site.pages || {};
+    Object.assign(patch, { layout: 'single', next_layout: null, sections: { ...(site.sections || {}), ...Object.fromEntries(['menu', 'interior', 'faq', 'news'].filter((k) => typeof pg[k] === 'boolean').map((k) => [k, pg[k]])) } });
+    downgraded.push('layout');
+  }
+  if (site.status !== 'pending' && site.next_tier === 'basic' && site.tier === 'pro') { Object.assign(patch, { tier: 'basic', next_tier: null }); downgraded.push('tier'); }
+  if (downgraded.length && ['live', 'overdue'].includes(site.status)) { needDeploy = true; deployVersionId = site.live_version_id || (await latestVersion() || {}).id || null; }
   if (site.status !== newStatus) patch.status = newStatus;
   if (site.status === 'suspended') { patch.suspended_at = null; patch.suspend_reason = null; needDeploy = true; deployVersionId = site.live_version_id || (await latestVersion() || {}).id || null; }
   if (site.status === 'pending') needDeploy = true;
@@ -30,6 +39,7 @@ export async function applyPayment({ db, site, siteId, amount, months, method, r
   const statusFrom = site.status;
   Object.assign(site, patch);
   await event('payment_confirmed', { payment_id: pay.id, amount, months, ...(method !== 'bank_transfer' ? { method } : {}), period_from: from, period_to: to, status_from: statusFrom, status_to: site.status });
+  if (downgraded.length) await event('plan_downgraded', { layout: downgraded.includes('layout') ? 'single' : undefined, tier: downgraded.includes('tier') ? 'basic' : undefined });
 
   let warning = '';
   if (needDeploy) {

@@ -104,16 +104,18 @@ var PLANS = {
   multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
 };
 var planFor = (layout2) => layout2 === "multi" ? PLANS.multi : PLANS.single;
-function priceFor(layout2, months) {
+var PRO_ADDON = { name: "進階功能", monthly: 400, yearPaidMonths: 10 };
+var monthlyOf = (layout2, tier = "basic") => planFor(layout2).monthly + (tier === "pro" ? PRO_ADDON.monthly : 0);
+function priceFor(layout2, months, tier = "basic") {
   const p = planFor(layout2);
   const years = Math.floor(months / 12);
-  return (years * p.yearPaidMonths + months % 12) * p.monthly;
+  return (years * p.yearPaidMonths + months % 12) * monthlyOf(layout2, tier);
 }
 
 // supabase/functions/rental-cron/handler.mjs
-var renewText = (layout2) => {
-  const p = planFor(layout2);
-  return "NT$ " + p.monthly.toLocaleString("en-US") + "／月（" + p.name + "）；一次付 12 個月 NT$ " + priceFor(layout2, 12).toLocaleString("en-US");
+var renewText = (site) => {
+  const layout2 = site.next_layout || site.layout, tier = site.next_tier || site.tier || "basic";
+  return "NT$ " + monthlyOf(layout2, tier).toLocaleString("en-US") + "／月（" + planFor(layout2).name + (tier === "pro" ? "＋" + PRO_ADDON.name : "") + "）；一次付 12 個月 NT$ " + priceFor(layout2, 12, tier).toLocaleString("en-US");
 };
 var REMINDER_DAYS = 7;
 var GRACE_DAYS = 7;
@@ -164,7 +166,7 @@ function safeEqual(a, b) {
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
-var SITE_COLS = "id,member_id,slug,status,layout,paid_until,suspended_at,suspend_reason,reminder_sent_for,overdue_notified_for,suspend_notified_for,cf_project_name,public_url,shop_name:content->>name";
+var SITE_COLS = "id,member_id,slug,status,layout,tier,next_layout,next_tier,paid_until,suspended_at,suspend_reason,reminder_sent_for,overdue_notified_for,suspend_notified_for,cf_project_name,public_url,shop_name:content->>name";
 var shopOf = (s) => s.shop_name || s.slug;
 var enc = encodeURIComponent;
 async function handleCron(req, deps) {
@@ -298,7 +300,7 @@ async function runRule(ctx, p) {
         releaseBody: { reminder_sent_for: null },
         to: await memberEmail(),
         template: "customerReminder",
-        build: () => customerReminder({ shopName: shopOf(site), paidUntil: pu, daysLeft: p.daysLeft, dashboardUrl: dash, priceText: renewText(site.layout) })
+        build: () => customerReminder({ shopName: shopOf(site), paidUntil: pu, daysLeft: p.daysLeft, dashboardUrl: dash, priceText: renewText(site) })
       });
       if (s === "sent") await event("reminder_sent", { paid_until: pu, days_left: p.daysLeft });
       return { outcome: s === "failed" ? "failed" : s === "skipped" ? "skipped" : "done", note: mailNote(s) };

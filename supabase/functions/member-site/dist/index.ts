@@ -202,17 +202,33 @@ function adminUpgradeRequest({ shopName, slug, memberEmail, amount, days, yearly
   const text = ["客戶申請升級成多頁版", "", shopName + "（" + slug + "，" + memberEmail + "）", "剩餘 " + days + " 天，" + (yearly ? "年繳" : "月繳") + "，差額 NT$ " + amount, "", "收到匯款後到管理後台按「確認收到升級差額」，系統會自動發佈多頁版。"].join("\n");
   return { subject, html, text };
 }
+function adminProRequest({ shopName, slug, memberEmail, amount, days, yearly, pending, adminUrl }) {
+  const subject = "【網站租用】申請進階功能" + (pending ? "，待補差額 NT$ " + Number(amount).toLocaleString("en-US") : "（已直接開通）") + "：" + shopName;
+  const html = layout(
+    "客戶申請進階功能",
+    "<p>「" + esc(shopName) + "」（" + esc(slug) + "，" + esc(memberEmail) + "）申請加購進階功能。</p>" + (pending ? "<p>剩餘 " + esc(days) + " 天，" + (yearly ? "年繳" : "月繳") + "，差額 <b>NT$ " + esc(Number(amount).toLocaleString("en-US")) + "</b>。收到匯款後到管理後台按「確認收到進階差額」就會開通。</p>" : "<p>這個網站沒有剩餘的已付天數，已直接開通；下一期起依新價格收費。</p>") + (adminUrl ? button(adminUrl, "開啟管理後台") : "")
+  );
+  const text = ["客戶申請進階功能", shopName + "（" + slug + "，" + memberEmail + "）", pending ? "差額 NT$ " + amount + "（剩 " + days + " 天，" + (yearly ? "年繳" : "月繳") + "），收到匯款後到管理後台確認。" : "已直接開通，下一期起依新價格收費。"].join("\n");
+  return { subject, html, text };
+}
 
 // supabase/functions/_shared/plans.mjs
 var PLANS = {
   single: { name: "自架版（一頁）", monthly: 599, yearPaidMonths: 10 },
   multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
 };
-function upgradeQuote({ paidUntil, today, yearly = false }) {
+var PRO_ADDON = { name: "進階功能", monthly: 400, yearPaidMonths: 10 };
+function prorate({ monthlyDiff, paidUntil, today, yearly = false }) {
   if (!paidUntil || paidUntil < today) return { days: 0, amount: 0, yearly };
   const days = Math.round((Date.parse(paidUntil + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) + 1;
-  const perDay = yearly ? (PLANS.multi.monthly - PLANS.single.monthly) * PLANS.single.yearPaidMonths / 365 : (PLANS.multi.monthly - PLANS.single.monthly) / 30;
+  const perDay = yearly ? monthlyDiff * PLANS.single.yearPaidMonths / 365 : monthlyDiff / 30;
   return { days, amount: Math.round(days * perDay), yearly };
+}
+function upgradeQuote({ paidUntil, today, yearly = false }) {
+  return prorate({ monthlyDiff: PLANS.multi.monthly - PLANS.single.monthly, paidUntil, today, yearly });
+}
+function proQuote({ paidUntil, today, yearly = false }) {
+  return prorate({ monthlyDiff: PRO_ADDON.monthly, paidUntil, today, yearly });
 }
 
 // templates/shared/industries.js
@@ -332,7 +348,7 @@ function pagesFromSections(sections) {
 }
 
 // supabase/functions/member-site/handler.mjs
-var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site", "set_booking", "invite_collab", "remove_collab", "accept_invites", "upgrade_quote", "upgrade_layout"];
+var ACTIONS = ["set_domain", "check_domain", "clear_domain", "get_pay", "set_pay", "order_done", "delete_site", "set_booking", "invite_collab", "remove_collab", "accept_invites", "upgrade_quote", "upgrade_layout", "pro_quote", "request_pro", "set_next"];
 var MAX_COLLABS = 5;
 var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 var DELETABLE = ["draft", "pending"];
@@ -370,6 +386,8 @@ async function handleMember(req, deps) {
   if (body.action === "set_booking") return setBooking(body, site, user, deps, reply, fail);
   if (body.action === "invite_collab" || body.action === "remove_collab") return collabAction(body, site, user, deps, reply, fail);
   if (body.action === "upgrade_quote" || body.action === "upgrade_layout") return upgradeAction(body, site, user, deps, reply, fail);
+  if (body.action === "pro_quote" || body.action === "request_pro") return proAction(body, site, user, deps, reply, fail);
+  if (body.action === "set_next") return setNext(body, site, user, deps, reply, fail);
   if (["get_pay", "set_pay", "order_done"].includes(body.action)) return payAction(body, site, user, deps, reply, fail);
   if (body.action === "delete_site") {
     if (!DELETABLE.includes(site.status) || site.first_published_at) return fail("not_allowed", "已上線過的網站不能自己刪除，請用 LINE（@788cblaq）聯絡我們辦理終止", 409);
@@ -500,11 +518,11 @@ async function acceptInvites(user, deps, reply) {
   return reply({ ok: true, accepted: r.length }, 200);
 }
 var PAID_STATUSES = ["live", "overdue", "suspended"];
-async function quoteFor(site, deps) {
+async function quoteFor(site, deps, fn = upgradeQuote) {
   const today = new Date((deps.now ? deps.now() : /* @__PURE__ */ new Date()).getTime() + 8 * 3600 * 1e3).toISOString().slice(0, 10);
   if (!PAID_STATUSES.includes(site.status) || !site.paid_until) return { days: 0, amount: 0, yearly: false };
   const last = await deps.db.getOne("payments", "site_id=eq." + site.id + "&select=months&order=paid_on.desc");
-  return upgradeQuote({ paidUntil: site.paid_until, today, yearly: !!(last && last.months >= 12) });
+  return fn({ paidUntil: site.paid_until, today, yearly: !!(last && last.months >= 12) });
 }
 async function upgradeAction(body, site, user, deps, reply, fail) {
   const { db: db2 } = deps;
@@ -535,6 +553,60 @@ async function upgradeAction(body, site, user, deps, reply, fail) {
     yearly: q.yearly,
     message: pending ? "已升級成多頁版。請匯款升級差額 NT$ " + q.amount.toLocaleString("en-US") + "，我們確認收到後會自動發佈多頁版；在那之前正式網站維持一頁版。" : "已升級成多頁版，按「發佈」後正式網站就會變成多頁。"
   }, 200);
+}
+async function proAction(body, site, user, deps, reply, fail) {
+  const { db: db2 } = deps;
+  if (site.tier === "pro") return fail("not_allowed", "這個網站已經有進階功能", 409);
+  if (site.pro_pending) return fail("not_allowed", "已經申請過了，我們確認收到差額後就會開通", 409);
+  if (site.status === "cancelled") return fail("not_allowed", "這個網站已終止服務", 409);
+  const q = await quoteFor(site, deps, proQuote);
+  if (body.action === "pro_quote") return reply({ ok: true, ...q }, 200);
+  const pending = q.amount > 0;
+  const now = (deps.now ? deps.now() : /* @__PURE__ */ new Date()).toISOString();
+  const done = await db2.patchReturning("rental_sites", "id=eq." + site.id + "&tier=eq.basic&pro_pending=eq.false", pending ? { pro_pending: true, pro_amount: q.amount, pro_requested_at: now, next_tier: null } : { tier: "pro", pro_amount: 0, pro_requested_at: now, next_tier: null });
+  if (!done.length) return fail("not_allowed", "目前不能申請，請重新整理後再試", 409);
+  const by = "member:" + (user.email || user.id);
+  await db2.insert("site_events", { site_id: site.id, type: "pro_requested", detail: { amount: q.amount, days: q.days, yearly: q.yearly, pending, by } }).catch(() => {
+  });
+  if (deps.sendMail && deps.adminEmail) {
+    await deps.sendMail({ to: deps.adminEmail, ...adminProRequest({ shopName: site.content && site.content.name || site.slug, slug: site.slug, memberEmail: user.email || "", amount: q.amount, days: q.days, yearly: q.yearly, pending, adminUrl: deps.adminUrl }) }).catch(() => null);
+  }
+  if (!pending && ["live", "overdue"].includes(site.status) && site.live_version_id && deps.dispatch) await deps.dispatch({ siteId: site.id, versionId: site.live_version_id }).catch(() => null);
+  return reply({
+    ok: true,
+    pending,
+    amount: q.amount,
+    days: q.days,
+    yearly: q.yearly,
+    message: pending ? "已申請進階功能。請匯款差額 NT$ " + q.amount.toLocaleString("en-US") + "，我們確認收到後就會開通。" : "已開通進階功能，下一期起依新價格計費。"
+  }, 200);
+}
+async function setNext(body, site, user, deps, reply, fail) {
+  const { db: db2 } = deps;
+  const patch = {};
+  if ("next_layout" in body) {
+    if (body.next_layout === "single") {
+      if (site.layout !== "multi") return fail("bad_request", "網站已經是一頁版");
+      if (site.upgrade_pending) return fail("not_allowed", "升級還在等待補差額，不能同時申請改回一頁版", 409);
+      patch.next_layout = "single";
+    } else if (body.next_layout === null) patch.next_layout = null;
+    else return fail("bad_request", "只能申請改回一頁版");
+  }
+  if ("next_tier" in body) {
+    if (body.next_tier === "basic") {
+      if (site.tier !== "pro") return fail("bad_request", "網站沒有進階功能");
+      patch.next_tier = "basic";
+    } else if (body.next_tier === null) patch.next_tier = null;
+    else return fail("bad_request", "只能申請取消進階功能");
+  }
+  if (!Object.keys(patch).length) return fail("bad_request", "沒有要變更的項目");
+  await db2.patch("rental_sites", "id=eq." + site.id, patch);
+  await db2.insert("site_events", { site_id: site.id, type: "next_plan_set", detail: { ...patch, by: "member:" + (user.email || user.id) } }).catch(() => {
+  });
+  const parts = [];
+  if (patch.next_layout === "single") parts.push("下一期起改回一頁版");
+  if (patch.next_tier === "basic") parts.push("下一期起取消進階功能");
+  return reply({ ok: true, ...patch, message: parts.length ? "已申請：" + parts.join("、") + "。續約確認收款時生效，內容都會保留。" : "已取消改方案的申請。" }, 200);
 }
 
 // build/lib/supabase.mjs

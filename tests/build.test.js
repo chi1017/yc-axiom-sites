@@ -147,3 +147,9 @@ test('runBuild: an upgrade waiting for payment still deploys the one-page site',
   await runBuild({ siteId: SID, outDir: out2, db, cf: fakeCf(), deploy: async () => {}, log: () => {} });
   assert.ok(existsSync(join(out2, 'about/index.html')));
 });
+test('runBuild: a site changed back to one page renders one page even from a multi-page version', async () => {
+  const db = fakeDb({ siteLayout: 'single', verLayout: 'multi', verPages: { about: true, menu: true, interior: true, news: true, faq: true, visit: true } });
+  const out = join(mkdtempSync(join(tmpdir(), 'd-')), 'dist');
+  await runBuild({ siteId: SID, outDir: out, db, cf: fakeCf(), deploy: async () => {}, log: () => {} });
+  assert.ok(existsSync(join(out, 'index.html'))); assert.ok(!existsSync(join(out, 'about/index.html')));
+});

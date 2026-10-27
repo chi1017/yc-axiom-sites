@@ -2,7 +2,7 @@
 // 所有外部依賴由 deps 注入，方便在 Node 內測試。只有 JWT app_metadata.role = admin 能呼叫；
 // 每個動作都會在 site_events 留下紀錄（含操作者 Email）。
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
-import { customerReceipt, customerCodeResult, customerUpgradeDone } from '../_shared/emails.mjs';
+import { customerReceipt, customerCodeResult, customerUpgradeDone, customerProDone } from '../_shared/emails.mjs';
 import { planFor } from '../_shared/plans.mjs';
 import { normalizeDomain, domainAction } from '../_shared/domain.mjs';
 import { applyPayment } from '../_shared/payment.mjs';
@@ -11,7 +11,7 @@ export { parseOrigins };
 
 const MAX_MONTHS = 60;
 const MAX_AMOUNT = 10000000;
-const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain', 'set_tier', 'review_code', 'confirm_upgrade'];
+const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain', 'set_tier', 'review_code', 'confirm_upgrade', 'confirm_pro', 'set_next'];
 const PHOTO_BUCKET = 'site-photos';
 
 // 台灣日期（UTC+8）。到期日、「今天」都以台灣時間計算。
@@ -205,11 +205,39 @@ export async function handleAdmin(req, deps) {
       return reply({ ok: true, message: '已確認。網站恢復上線時會使用多頁版。' }, 200);
     }
 
+    // 確認收到進階功能的差額：開通進階功能，上線中的網站重新部署
+    case 'confirm_pro': {
+      if (!site.pro_pending) return fail('not_allowed', '這個網站沒有待補差額的進階功能申請', 409);
+      const reference = body.reference == null ? '' : String(body.reference).trim();
+      if (reference.length > 100) return fail('bad_request', '匯款備註最長 100 字');
+      const waived = body.waived === true;
+      await db.patch('rental_sites', 'id=eq.' + siteId, { tier: 'pro', pro_pending: false });
+      await event('pro_paid', { amount: waived ? 0 : site.pro_amount || 0, reference, ...(waived ? { waived: true } : {}) });
+      const member = await db.getOne('members', 'id=eq.' + site.member_id + '&select=email');
+      if (member && member.email && deps.sendMail) await deps.sendMail({ to: member.email, ...customerProDone({ shopName: (site.content && site.content.name) || site.slug, amount: waived ? 0 : site.pro_amount }) }).catch(() => null);
+      if (['live', 'overdue'].includes(site.status) && site.live_version_id) {
+        const d = await queueDeploy({ versionId: site.live_version_id });
+        return reply({ ok: true, message: '已開通進階功能，網站重新部署中。', ...(d.ok ? {} : { warning: deployWarn }) }, 200);
+      }
+      return reply({ ok: true, message: '已開通進階功能。' }, 200);
+    }
+
+    // 下一期改方案（管理員代為設定或取消）
+    case 'set_next': {
+      const patch = {};
+      if ('next_layout' in body) patch.next_layout = body.next_layout === 'single' && site.layout === 'multi' ? 'single' : null;
+      if ('next_tier' in body) patch.next_tier = body.next_tier === 'basic' && site.tier === 'pro' ? 'basic' : null;
+      if (!Object.keys(patch).length) return fail('bad_request', '沒有要變更的項目');
+      await db.patch('rental_sites', 'id=eq.' + siteId, patch);
+      await event('next_plan_set', patch);
+      return reply({ ok: true, message: '已更新下一期的方案設定。' }, 200);
+    }
+
     // 方案：basic／pro。降回一般方案時，上線中的網站會重新部署（拿掉程式碼與預約行事曆）
     case 'set_tier': {
       if (!['basic', 'pro'].includes(body.tier)) return fail('bad_request', '方案只能是 basic 或 pro');
       if (body.tier === site.tier) return reply({ ok: true, message: '方案沒有變更。' }, 200);
-      await db.patch('rental_sites', 'id=eq.' + siteId, { tier: body.tier });
+      await db.patch('rental_sites', 'id=eq.' + siteId, { tier: body.tier, pro_pending: false, next_tier: null });
       await event('tier_changed', { from: site.tier || 'basic', to: body.tier });
       if (['live', 'overdue'].includes(site.status) && site.live_version_id) {
         const d = await queueDeploy({ versionId: site.live_version_id });
