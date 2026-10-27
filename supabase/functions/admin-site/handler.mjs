@@ -2,7 +2,8 @@
 // 所有外部依賴由 deps 注入，方便在 Node 內測試。只有 JWT app_metadata.role = admin 能呼叫；
 // 每個動作都會在 site_events 留下紀錄（含操作者 Email）。
 import { UUID, corsHeaders, parseOrigins, json } from '../_shared/http.mjs';
-import { customerReceipt, customerCodeResult } from '../_shared/emails.mjs';
+import { customerReceipt, customerCodeResult, customerUpgradeDone } from '../_shared/emails.mjs';
+import { planFor } from '../_shared/plans.mjs';
 import { normalizeDomain, domainAction } from '../_shared/domain.mjs';
 import { applyPayment } from '../_shared/payment.mjs';
 export { normalizeDomain };
@@ -10,7 +11,7 @@ export { parseOrigins };
 
 const MAX_MONTHS = 60;
 const MAX_AMOUNT = 10000000;
-const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain', 'set_tier', 'review_code'];
+const ACTIONS = ['confirm_payment', 'republish', 'suspend', 'restore', 'terminate', 'purge', 'restore_version', 'set_domain', 'check_domain', 'clear_domain', 'set_tier', 'review_code', 'confirm_upgrade'];
 const PHOTO_BUCKET = 'site-photos';
 
 // 台灣日期（UTC+8）。到期日、「今天」都以台灣時間計算。
@@ -183,6 +184,25 @@ export async function handleAdmin(req, deps) {
       await event('version_restore_queued', { version_id: ver.id, overwrite_draft: overwrite });
       const d = await queueDeploy({ versionId: ver.id });
       return d.ok ? reply({ ok: true, message: '已排入還原' + (overwrite ? '（並已覆蓋會員草稿）' : '（會員草稿未更動）') + '，約 1–2 分鐘。' }, 200) : fail('dispatch_failed', '沒有送出成功：' + deployWarn, 502);
+    }
+
+    // 確認收到「一頁升級多頁」的差額：解除待補款，發佈最新版本（多頁版），寄信通知客戶
+    case 'confirm_upgrade': {
+      if (!site.upgrade_pending) return fail('not_allowed', '這個網站沒有待補差額的升級', 409);
+      const reference = body.reference == null ? '' : String(body.reference).trim();
+      if (reference.length > 100) return fail('bad_request', '匯款備註最長 100 字');
+      const waived = body.waived === true;
+      await db.patch('rental_sites', 'id=eq.' + siteId, { upgrade_pending: false });
+      await event('upgrade_paid', { amount: waived ? 0 : site.upgrade_amount || 0, reference, ...(waived ? { waived: true } : {}) });
+      const member = await db.getOne('members', 'id=eq.' + site.member_id + '&select=email');
+      const p = planFor('multi');
+      if (member && member.email && deps.sendMail) await deps.sendMail({ to: member.email, ...customerUpgradeDone({ shopName: (site.content && site.content.name) || site.slug, amount: waived ? 0 : site.upgrade_amount, nextPrice: 'NT$ ' + p.monthly + '／月' }) }).catch(() => null);
+      if (['live', 'overdue'].includes(site.status)) {
+        const lv = await latestVersion();
+        const d = await queueDeploy({ versionId: (lv && lv.id) || site.live_version_id });
+        return reply({ ok: true, message: '已確認，多頁版發佈中（約 1–2 分鐘）。', ...(d.ok ? {} : { warning: deployWarn }) }, 200);
+      }
+      return reply({ ok: true, message: '已確認。網站恢復上線時會使用多頁版。' }, 200);
     }
 
     // 方案：basic／pro。降回一般方案時，上線中的網站會重新部署（拿掉程式碼與預約行事曆）

@@ -56,15 +56,16 @@ const rowsTable = (rows) => '<table style="border-collapse:collapse;width:100%">
 const LINE_HINT = '有任何問題都可以直接回覆這封信，或用 LINE ' + CONTACT.line + ' 聯絡我們。';
 
 // 到期前 7 天（含）內的提醒
-export function customerReminder({ shopName, paidUntil, daysLeft, dashboardUrl }) {
+export function customerReminder({ shopName, paidUntil, daysLeft, dashboardUrl, priceText = '' }) {
   const when = daysLeft <= 0 ? '今天' : daysLeft + ' 天後';
   const subject = '【YC AXIOM】你的網站租用即將到期（' + paidUntil + '）：' + shopName;
   const html = layout('網站租用即將到期',
     '<p>' + esc(shopName) + ' 的網站租用服務將於 <b>' + esc(paidUntil) + '</b>（' + esc(when) + '）到期。</p>' +
+    (priceText ? '<p>續約費用：<b>' + esc(priceText) + '</b></p>' : '') +
     '<p>為了讓網站不中斷，請在到期日前完成續約匯款。匯款資訊與方案可以在會員專區的「我的網站」查看：</p>' + (dashboardUrl ? button(dashboardUrl, '前往會員專區') : '') +
     '<p>匯款後請用 LINE（' + CONTACT.line + '）或直接回覆這封信告訴我們匯款帳號末五碼，我們確認後會更新到期日。</p>' +
     '<p style="color:#666;font-size:13px">如果已經匯款，請忽略這封信；若不打算續約，也歡迎讓我們知道。' + esc(ADD_CONTACT) + '</p>');
-  const text = [shopName + ' 的網站租用服務將於 ' + paidUntil + '（' + when + '）到期。', '', '請在到期日前完成續約匯款，匯款資訊在會員專區「我的網站」：' + (dashboardUrl || ''), '匯款後請用 LINE（' + CONTACT.line + '）或回覆這封信告訴我們匯款帳號末五碼。', '', ADD_CONTACT].join('\n');
+  const text = [shopName + ' 的網站租用服務將於 ' + paidUntil + '（' + when + '）到期。', priceText ? '續約費用：' + priceText : '', '', '請在到期日前完成續約匯款，匯款資訊在會員專區「我的網站」：' + (dashboardUrl || ''), '匯款後請用 LINE（' + CONTACT.line + '）或回覆這封信告訴我們匯款帳號末五碼。', '', ADD_CONTACT].join('\n');
   return { subject, html, text };
 }
 
@@ -186,5 +187,27 @@ export function collabInvite({ shopName, inviter, dashboardUrl }) {
     (dashboardUrl ? button(dashboardUrl, '前往會員專區') : '') +
     '<p style="color:#666;font-size:13px">協作者可以編輯內容、發佈更新、處理預約；收款設定、網域與刪除網站只有擁有者能操作。</p>');
   const text = [(inviter || '網站擁有者') + ' 邀請你一起編輯「' + shopName + '」的網站。', '請用這個 Email 登入 YC AXIOM 會員專區，登入後就會看到這個網站。', dashboardUrl].filter(Boolean).join('\n');
+  return { subject, html, text };
+}
+
+// 客戶申請一頁版升級多頁版，需要補差額 → 通知管理員
+export function adminUpgradeRequest({ shopName, slug, memberEmail, amount, days, yearly, adminUrl }) {
+  const subject = '【網站租用】升級多頁版，待補差額 NT$ ' + Number(amount).toLocaleString('en-US') + '：' + shopName;
+  const html = layout('客戶申請升級成多頁版',
+    '<p>「' + esc(shopName) + '」（' + esc(slug) + '，' + esc(memberEmail) + '）申請把網站升級成多頁版。</p>' +
+    '<p>剩餘 ' + esc(days) + ' 天，' + (yearly ? '年繳' : '月繳') + '，差額 <b>NT$ ' + esc(Number(amount).toLocaleString('en-US')) + '</b>。</p>' +
+    '<p>收到客戶匯款後，到管理後台的網站詳情按「確認收到升級差額」，系統會自動發佈多頁版。在那之前正式網站維持一頁版。</p>' +
+    (adminUrl ? button(adminUrl, '開啟管理後台') : ''));
+  const text = ['客戶申請升級成多頁版', '', shopName + '（' + slug + '，' + memberEmail + '）', '剩餘 ' + days + ' 天，' + (yearly ? '年繳' : '月繳') + '，差額 NT$ ' + amount, '', '收到匯款後到管理後台按「確認收到升級差額」，系統會自動發佈多頁版。'].join('\n');
+  return { subject, html, text };
+}
+// 升級差額確認 → 通知客戶
+export function customerUpgradeDone({ shopName, amount, nextPrice }) {
+  const subject = '【YC AXIOM】已收到升級差額，多頁版上線中：' + shopName;
+  const html = layout('已收到升級差額',
+    '<p>我們已收到 ' + esc(shopName) + ' 的升級差額' + (amount ? ' NT$ ' + esc(Number(amount).toLocaleString('en-US')) : '') + '，多頁版網站正在發佈，約 1–2 分鐘後生效。</p>' +
+    (nextPrice ? '<p>下一期起依多頁版計費：' + esc(nextPrice) + '。</p>' : '') +
+    '<p style="color:#666;font-size:13px">' + esc(ADD_CONTACT) + '</p>');
+  const text = ['我們已收到 ' + shopName + ' 的升級差額' + (amount ? ' NT$ ' + amount : '') + '，多頁版網站正在發佈，約 1–2 分鐘後生效。', nextPrice ? '下一期起依多頁版計費：' + nextPrice + '。' : ''].filter(Boolean).join('\n');
   return { subject, html, text };
 }

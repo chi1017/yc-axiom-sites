@@ -101,6 +101,11 @@ export async function handlePublish(req, deps) {
     await event('version_saved', { version_id: version.id });
     return reply({ ok: true, status: 'pending', version_id: version.id, message: withNote('已更新送審的內容。網站開通後會使用最新版本。') }, 200);
   }
+  // 升級多頁版還沒確認收到差額：先存版本，確認收款後由管理員發佈（正式網站維持一頁版）
+  if (site.upgrade_pending) {
+    await event('version_saved', { version_id: version.id, upgrade_pending: true });
+    return reply({ ok: true, status: site.status, upgrade_pending: true, version_id: version.id, message: withNote('多頁版已儲存。我們確認收到升級差額' + (site.upgrade_amount ? ' NT$ ' + Number(site.upgrade_amount).toLocaleString('en-US') : '') + ' 後，會自動發佈多頁版；在那之前正式網站維持一頁版。') }, 200);
+  }
   // live / overdue：排入部署
   await event('deploy_queued', { version_id: version.id });
   const d = await deps.dispatch({ siteId, versionId: version.id }).catch((e) => ({ ok: false, error: String(e) }));

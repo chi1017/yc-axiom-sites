@@ -44,14 +44,14 @@ var ADD_CONTACT = "為避免我們的信件被歸到垃圾信匣，請把 " + CO
 var button = (href, label) => '<p><a href="' + esc(href) + '" style="display:inline-block;background:#2f4a3a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">' + esc(label) + "</a></p>";
 var rowsTable = (rows) => '<table style="border-collapse:collapse;width:100%">' + rows.map((r) => '<tr><td style="padding:6px 12px 6px 0;color:#777;white-space:nowrap;vertical-align:top">' + esc(r[0]) + '</td><td style="padding:6px 0">' + esc(r[1]) + "</td></tr>").join("") + "</table>";
 var LINE_HINT = "有任何問題都可以直接回覆這封信，或用 LINE " + CONTACT.line + " 聯絡我們。";
-function customerReminder({ shopName, paidUntil, daysLeft, dashboardUrl }) {
+function customerReminder({ shopName, paidUntil, daysLeft, dashboardUrl, priceText = "" }) {
   const when = daysLeft <= 0 ? "今天" : daysLeft + " 天後";
   const subject = "【YC AXIOM】你的網站租用即將到期（" + paidUntil + "）：" + shopName;
   const html = layout(
     "網站租用即將到期",
-    "<p>" + esc(shopName) + " 的網站租用服務將於 <b>" + esc(paidUntil) + "</b>（" + esc(when) + "）到期。</p><p>為了讓網站不中斷，請在到期日前完成續約匯款。匯款資訊與方案可以在會員專區的「我的網站」查看：</p>" + (dashboardUrl ? button(dashboardUrl, "前往會員專區") : "") + "<p>匯款後請用 LINE（" + CONTACT.line + '）或直接回覆這封信告訴我們匯款帳號末五碼，我們確認後會更新到期日。</p><p style="color:#666;font-size:13px">如果已經匯款，請忽略這封信；若不打算續約，也歡迎讓我們知道。' + esc(ADD_CONTACT) + "</p>"
+    "<p>" + esc(shopName) + " 的網站租用服務將於 <b>" + esc(paidUntil) + "</b>（" + esc(when) + "）到期。</p>" + (priceText ? "<p>續約費用：<b>" + esc(priceText) + "</b></p>" : "") + "<p>為了讓網站不中斷，請在到期日前完成續約匯款。匯款資訊與方案可以在會員專區的「我的網站」查看：</p>" + (dashboardUrl ? button(dashboardUrl, "前往會員專區") : "") + "<p>匯款後請用 LINE（" + CONTACT.line + '）或直接回覆這封信告訴我們匯款帳號末五碼，我們確認後會更新到期日。</p><p style="color:#666;font-size:13px">如果已經匯款，請忽略這封信；若不打算續約，也歡迎讓我們知道。' + esc(ADD_CONTACT) + "</p>"
   );
-  const text = [shopName + " 的網站租用服務將於 " + paidUntil + "（" + when + "）到期。", "", "請在到期日前完成續約匯款，匯款資訊在會員專區「我的網站」：" + (dashboardUrl || ""), "匯款後請用 LINE（" + CONTACT.line + "）或回覆這封信告訴我們匯款帳號末五碼。", "", ADD_CONTACT].join("\n");
+  const text = [shopName + " 的網站租用服務將於 " + paidUntil + "（" + when + "）到期。", priceText ? "續約費用：" + priceText : "", "", "請在到期日前完成續約匯款，匯款資訊在會員專區「我的網站」：" + (dashboardUrl || ""), "匯款後請用 LINE（" + CONTACT.line + "）或回覆這封信告訴我們匯款帳號末五碼。", "", ADD_CONTACT].join("\n");
   return { subject, html, text };
 }
 function customerOverdue({ shopName, paidUntil, suspendOn, dashboardUrl }) {
@@ -98,7 +98,23 @@ function adminWeeklySummary({ today, counts, sections, adminUrl }) {
   return { subject, html, text };
 }
 
+// supabase/functions/_shared/plans.mjs
+var PLANS = {
+  single: { name: "自架版（一頁）", monthly: 599, yearPaidMonths: 10 },
+  multi: { name: "自架版（多頁）", monthly: 899, yearPaidMonths: 10 }
+};
+var planFor = (layout2) => layout2 === "multi" ? PLANS.multi : PLANS.single;
+function priceFor(layout2, months) {
+  const p = planFor(layout2);
+  const years = Math.floor(months / 12);
+  return (years * p.yearPaidMonths + months % 12) * p.monthly;
+}
+
 // supabase/functions/rental-cron/handler.mjs
+var renewText = (layout2) => {
+  const p = planFor(layout2);
+  return "NT$ " + p.monthly.toLocaleString("en-US") + "／月（" + p.name + "）；一次付 12 個月 NT$ " + priceFor(layout2, 12).toLocaleString("en-US");
+};
 var REMINDER_DAYS = 7;
 var GRACE_DAYS = 7;
 var LONG_SUSPEND_DAYS = 30;
@@ -148,7 +164,7 @@ function safeEqual(a, b) {
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
-var SITE_COLS = "id,member_id,slug,status,paid_until,suspended_at,suspend_reason,reminder_sent_for,overdue_notified_for,suspend_notified_for,cf_project_name,public_url,shop_name:content->>name";
+var SITE_COLS = "id,member_id,slug,status,layout,paid_until,suspended_at,suspend_reason,reminder_sent_for,overdue_notified_for,suspend_notified_for,cf_project_name,public_url,shop_name:content->>name";
 var shopOf = (s) => s.shop_name || s.slug;
 var enc = encodeURIComponent;
 async function handleCron(req, deps) {
@@ -282,7 +298,7 @@ async function runRule(ctx, p) {
         releaseBody: { reminder_sent_for: null },
         to: await memberEmail(),
         template: "customerReminder",
-        build: () => customerReminder({ shopName: shopOf(site), paidUntil: pu, daysLeft: p.daysLeft, dashboardUrl: dash })
+        build: () => customerReminder({ shopName: shopOf(site), paidUntil: pu, daysLeft: p.daysLeft, dashboardUrl: dash, priceText: renewText(site.layout) })
       });
       if (s === "sent") await event("reminder_sent", { paid_until: pu, days_left: p.daysLeft });
       return { outcome: s === "failed" ? "failed" : s === "skipped" ? "skipped" : "done", note: mailNote(s) };

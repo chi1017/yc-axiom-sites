@@ -57,7 +57,8 @@ export async function runBuild({ siteId, versionId, mode = 'normal', outDir, db,
     }
     const content = effectiveContent(raw, { tier: site.tier, codeApproved });
     // 版型：網站已升級成多頁時，舊的一頁版本也用多頁輸出（頁面勾選沿用當時的區塊開關），網站不會因還原舊版而退回一頁
-    const layout = normalizeLayout(site.layout) === 'multi' ? 'multi' : normalizeLayout(ver.layout);
+    // 升級多頁版、還沒確認收到差額（upgrade_pending）：正式網站維持一頁版
+    const layout = site.upgrade_pending ? 'single' : normalizeLayout(site.layout) === 'multi' ? 'multi' : normalizeLayout(ver.layout);
     const pages = layout === 'multi' ? (normalizeLayout(ver.layout) === 'multi' ? normalizePages(ver.pages) : pagesFromSections(ver.sections)) : undefined;
     if (!check.ok) throw new Error('內容未通過檢查：' + check.errors.map((e) => e.msg).join('、'));
 

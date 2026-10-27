@@ -18,3 +18,13 @@ export function priceFor(layout, months) {
   const years = Math.floor(months / 12);
   return (years * p.yearPaidMonths + (months % 12)) * p.monthly;
 }
+
+// 一頁版升級多頁版的差額（剩下的已付天數 × 兩種方案的價差）。
+// 月繳：每天 =（多頁月費 − 一頁月費）÷ 30；年繳（付 10 個月用 12 個月）：每天 =（兩種年費的差）÷ 365。四捨五入到元。
+// paidUntil：服務到期日（含當天）；today：台灣日期；yearly：最近一次付款是 12 個月以上。
+export function upgradeQuote({ paidUntil, today, yearly = false }) {
+  if (!paidUntil || paidUntil < today) return { days: 0, amount: 0, yearly };
+  const days = Math.round((Date.parse(paidUntil + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000) + 1;
+  const perDay = yearly ? ((PLANS.multi.monthly - PLANS.single.monthly) * PLANS.single.yearPaidMonths) / 365 : (PLANS.multi.monthly - PLANS.single.monthly) / 30;
+  return { days, amount: Math.round(days * perDay), yearly };
+}
