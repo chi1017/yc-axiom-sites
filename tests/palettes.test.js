@@ -41,3 +41,15 @@ function hslHex(h, s, l) { // 小工具：產生測試用顏色
   const f = (n) => { const k = (n + h / 30) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); };
   return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
+
+test('four-colour custom palette: kept as given, derived colours readable when possible, warnings for poor contrast', async () => {
+  const { paletteFrom4, normalizeColors4, colorWarnings } = await import('../templates/shared/palettes.js');
+  const c4 = normalizeColors4({ bg: '#fdf6ec', surface: '#F3E3CC', accent: '#B5179E', text: '#2A1A12' });
+  assert.deepEqual(c4, { bg: '#FDF6EC', surface: '#F3E3CC', accent: '#B5179E', text: '#2A1A12' });
+  const p = paletteFrom4(c4);
+  assert.equal(p.bg, '#FDF6EC'); assert.equal(p.accent, '#B5179E');
+  assert.ok(contrast(p.muted, p.surface) >= 4.5); assert.ok(contrast(p.onAccent, p.accent) >= 4.5);
+  assert.deepEqual(colorWarnings(c4), []);
+  assert.equal(normalizeColors4({ bg: '#fff', surface: '#000000', accent: '#111111', text: '#222222' }), null);
+  assert.ok(colorWarnings({ bg: '#FFFFFF', surface: '#FFFFFF', accent: '#FAFAFA', text: '#EEEEEE' }).length >= 2);
+});

@@ -80,3 +80,30 @@ export function getPalette(id) {
   if (c) return { label: '自訂配色', ...derivePalette(c.accent, c.dark) };
   return PALETTES[id] || PALETTES.forest;
 }
+
+// ── 完全自訂：店家自己選 4 個顏色（背景、區塊底色、主色、文字），其餘（次要文字、線條、按鈕字色）自動推算 ──
+export const HEX_RE = /^#[0-9A-F]{6}$/;
+const mix = (a, b, t) => { const x = hexToRgb(a), y = hexToRgb(b); return rgbToHex(x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t); };
+export function normalizeColors4(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = {};
+  for (const k of ['bg', 'surface', 'accent', 'text']) { const v = String(raw[k] || '').toUpperCase(); if (!HEX_RE.test(v)) return null; o[k] = v; }
+  return o;
+}
+export function paletteFrom4(c4) {
+  const { bg, surface, accent, text } = c4;
+  // 次要文字：從文字色往底色靠，但在區塊底色上至少保持 4.5 的對比（做不到就用文字色）
+  let muted = text;
+  for (let t = 0.45; t >= 0; t -= 0.05) { const m = mix(text, bg, t); if (contrast(m, surface) >= 4.5 && contrast(m, bg) >= 4.5) { muted = m; break; } }
+  const line = mix(surface, text, 0.14);
+  const onAccent = contrast('#FFFFFF', accent) >= contrast('#000000', accent) ? '#FFFFFF' : '#000000';
+  return { label: '自訂配色', bg, surface, text, muted, accent, onAccent, line };
+}
+// 編輯器提醒用：哪些組合可能看不清楚
+export function colorWarnings(c4) {
+  const w = [];
+  if (contrast(c4.text, c4.bg) < 4.5) w.push('文字和背景顏色太接近，可能看不清楚');
+  else if (contrast(c4.text, c4.surface) < 4.5) w.push('文字和區塊底色太接近，有底色的區塊可能看不清楚');
+  if (contrast(c4.accent, c4.bg) < 3) w.push('主色和背景太接近，按鈕和連結會不明顯');
+  return w;
+}
