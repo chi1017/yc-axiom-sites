@@ -268,8 +268,10 @@ h2.big{font-size:clamp(34px,5.2vw,60px);margin-bottom:24px;letter-spacing:.01em}
 .embed-ph code{display:block;margin-top:10px;font-size:13px;white-space:pre-wrap;word-break:break-all;opacity:.8}
 
 /* ── 預約行事曆 ── */
-.cal-set{border:0;padding:0;margin:0 0 14px}.cal-set legend{font-weight:600;margin-bottom:8px;padding:0}
-.cal-days,.cal-times{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
+.cal-set{border:0;padding:0;margin:0 0 14px;min-width:0;max-width:100%}.cal-set legend{font-weight:600;margin-bottom:8px;padding:0}
+.cal-days,.cal-times{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin;max-width:100%;overscroll-behavior-x:contain}
+.cal{max-width:100%;min-width:0}
+.cal-hint{margin:2px 0 0;font-size:13px}
 .cal-times{flex-wrap:wrap;overflow:visible;margin-top:10px}
 .cal-day,.cal-time{flex:0 0 auto;font:inherit;font-size:15px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:8px 14px;cursor:pointer;white-space:nowrap}
 .alt .cal-day,.alt .cal-time{background:var(--surface)}

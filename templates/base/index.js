@@ -424,7 +424,7 @@ const CAL_SCRIPT = '<script>(function(){var f=document.querySelector(".cal-form"
   'function show(d,btn){[].forEach.call(dw.children,function(b){b.setAttribute("aria-pressed",b===btn?"true":"false")});tw.textContent="";D.value="";T.value="";B.disabled=true;P.textContent="";' +
   'd.slots.forEach(function(s){var b=el("button","cal-time",s.time);b.type="button";b.appendChild(el("small",null,s.left>0?"剩 "+s.left:"額滿"));if(s.left<1)b.disabled=true;' +
   'b.onclick=function(){[].forEach.call(tw.children,function(x){x.setAttribute("aria-pressed",x===b?"true":"false")});D.value=d.date;T.value=s.time;B.disabled=false;P.textContent="已選："+lab(d.date)+" "+s.time};tw.appendChild(b)})}' +
-  'days.forEach(function(d,i){var full=!d.slots.some(function(s){return s.left>0});var b=el("button","cal-day",lab(d.date)+(full?" 額滿":""));b.type="button";b.onclick=function(){show(d,b)};dw.appendChild(b);if(i===0)show(d,b)})' +
+  'days.forEach(function(d,i){var full=!d.slots.some(function(s){return s.left>0});var b=el("button","cal-day",lab(d.date)+(full?" 額滿":""));b.type="button";b.onclick=function(){show(d,b)};dw.appendChild(b);if(i===0)show(d,b)});if(dw.scrollWidth>dw.clientWidth+4)box.insertBefore(el("p","note cal-hint","左右滑動可以看更多日期"),tw)' +
   '}).catch(function(){box.textContent="";box.appendChild(el("p","note","時段載入失敗，請重新整理網頁，或用電話與我們聯絡。"))});' +
   'f.addEventListener("submit",function(e){if(!D.value||!T.value){e.preventDefault();P.textContent="請先選擇日期與時段"}})})();</script>';
 
