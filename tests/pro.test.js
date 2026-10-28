@@ -259,3 +259,10 @@ test('next-period downgrade: requested by the member, applied when the renewal i
   await w2.call(handleMember, { action: 'set_next', site_id: SID, next_tier: null });
   assert.equal(w2.t.rental_sites[0].next_tier, null);
 });
+
+test('inline scripts on a live page are valid JavaScript (calendar, shop, menu)', () => {
+  const html = build({ bookingForm: true, bookingCal: CAL, shop: { enabled: true, items: [{ id: 'abcd1', name: 'x', price: 10 }] } }, { payReady: true }).html;
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.ok(scripts.length >= 2);
+  for (const s of scripts) assert.doesNotThrow(() => new Function(s));
+});
