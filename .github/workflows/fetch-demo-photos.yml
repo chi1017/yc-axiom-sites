@@ -17,7 +17,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci --no-audit --no-fund --prefer-offline
+          cache-dependency-path: package.json
+      - run: npm install --no-audit --no-fund --prefer-offline
       - run: node build/fetch-demo-photos.mjs
       - name: Push to demo-photos branch
         run: |

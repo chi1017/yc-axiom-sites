@@ -28,7 +28,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci --no-audit --no-fund --prefer-offline
+          cache-dependency-path: package.json
+      - run: npm install --no-audit --no-fund --prefer-offline
       - name: Redeploy
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
