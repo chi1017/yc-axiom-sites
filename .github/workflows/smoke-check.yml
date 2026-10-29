@@ -1,0 +1,36 @@
+name: Smoke check
+
+# 手動執行：檢查官網、版型展示與 Edge Function 是否正常回應（只讀取，不改任何東西）。結果顯示在執行摘要。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check
+        run: |
+          F=https://gatgcuntwqibpxhjviqw.supabase.co/functions/v1
+          bad=0
+          note() { echo "::notice::$1"; }
+          code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
+          for o in https://chi1017.github.io https://yc-axiom.pages.dev https://not-allowed.example; do
+            r="fetch-page=$(code -H "Origin: $o" "$F/fetch-page?url=https://example.com/")"
+            for f in member-site publish-site admin-site; do
+              a=$(curl -s -D - -o /dev/null -X OPTIONS -H "Origin: $o" -H "Access-Control-Request-Method: POST" "$F/$f" | grep -i '^access-control-allow-origin' | tr -d '\r' | awk '{print $2}')
+              r="$r $f=${a:-none}"
+            done
+            note "$o → $r"
+          done
+          for u in / /version.txt /robots.txt /sitemap.xml /llms.txt /rental/ /rental/templates/ /articles/shop-website-vs-instagram/ /articles/chatgpt-recommend-your-shop/ /seo/ /geo/ /builder/ /dashboard/ /no-such-page/; do
+            note "yc-axiom.pages.dev$u → $(code "https://yc-axiom.pages.dev$u")"
+          done
+          note "robots: $(curl -s https://yc-axiom.pages.dev/robots.txt | tr '\n' ' ')"
+          note "home canonical: $(curl -s https://yc-axiom.pages.dev/ | grep -o '<link rel="canonical"[^>]*>')"
+          n=$(curl -s https://yc-templates.pages.dev/gallery.json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
+          note "gallery.json 範例數：$n"
+          for k in cafe pet tcm lodging other; do note "yc-templates /$k/ → $(code https://yc-templates.pages.dev/$k/) thumb $(code https://yc-templates.pages.dev/$k/thumb.webp)"; done
