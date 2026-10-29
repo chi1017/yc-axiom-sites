@@ -8,8 +8,10 @@ function corsHeaders(req, allowed) {
   if (origin && allowed.includes(origin)) h["Access-Control-Allow-Origin"] = origin;
   return h;
 }
+var OFFICIAL_ORIGINS = ["https://chi1017.github.io", "https://yc-axiom.pages.dev"];
 function parseOrigins(v) {
-  return (v || "https://chi1017.github.io").split(",").map((s) => s.trim().replace(/\/$/, "")).filter(Boolean);
+  const list = (v || "").split(",").map((s) => s.trim().replace(/\/$/, "")).filter(Boolean);
+  return [.../* @__PURE__ */ new Set([...OFFICIAL_ORIGINS, ...list])];
 }
 var json = (body, status, headers = {}) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers } });
 

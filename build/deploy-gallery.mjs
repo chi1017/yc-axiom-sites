@@ -115,7 +115,7 @@ for (const ind of INDUSTRIES) {
 }
 if (!OFFLINE) writeFileSync(PHOTOS_FILE, JSON.stringify(photos, null, 1) + '\n');
 writeFileSync(join(OUT, 'gallery.json'), JSON.stringify(list, null, 1));
-writeFileSync(join(OUT, 'index.html'), '<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0;url=https://chi1017.github.io/yc-axiom-site/rental/templates/"><a href="https://chi1017.github.io/yc-axiom-site/rental/templates/">YC AXIOM 網站租用版型展示</a>');
+writeFileSync(join(OUT, 'index.html'), '<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0;url=https://yc-axiom.pages.dev/rental/templates/"><a href="https://yc-axiom.pages.dev/rental/templates/">YC AXIOM 網站租用版型展示</a>');
 writeFileSync(join(OUT, 'robots.txt'), 'User-agent: *\nDisallow:\n');
 writeFileSync(join(OUT, '_headers'), HEADERS_FILE + '/*\n  X-Robots-Tag: noindex, nofollow\n');
 console.log('範例網站', list.length, '個 →', OUT);
