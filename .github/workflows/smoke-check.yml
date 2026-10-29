@@ -26,11 +26,9 @@ jobs:
             done
             note "$o → $r"
           done
-          for u in / /version.txt /robots.txt /sitemap.xml /llms.txt /rental/ /rental/templates/ /articles/shop-website-vs-instagram/ /articles/chatgpt-recommend-your-shop/ /seo/ /geo/ /builder/ /dashboard/ /no-such-page/; do
-            note "yc-axiom.pages.dev$u → $(code "https://yc-axiom.pages.dev$u")"
-          done
-          note "robots: $(curl -s https://yc-axiom.pages.dev/robots.txt | tr '\n' ' ')"
-          note "home canonical: $(curl -s https://yc-axiom.pages.dev/ | grep -o '<link rel="canonical"[^>]*>')"
+          s=""; for u in / /version.txt /robots.txt /sitemap.xml /llms.txt /rental/ /rental/templates/ /articles/ /articles/shop-website-vs-instagram/ /articles/chatgpt-recommend-your-shop/ /seo/ /geo/ /builder/ /dashboard/ /terms/rental/ /no-such-page/; do s="$s $u=$(code "https://yc-axiom.pages.dev$u")"; done; note "官網:$s"
+          note "robots: $(curl -s https://yc-axiom.pages.dev/robots.txt | tr '\n' ' ') ／ canonical: $(curl -s https://yc-axiom.pages.dev/ | grep -o '<link rel="canonical"[^>]*>')"
           n=$(curl -s https://yc-templates.pages.dev/gallery.json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
-          note "gallery.json 範例數：$n"
-          for k in cafe pet tcm lodging other; do note "yc-templates /$k/ → $(code https://yc-templates.pages.dev/$k/) thumb $(code https://yc-templates.pages.dev/$k/thumb.webp)"; done
+          s=""; for k in $(curl -s https://yc-templates.pages.dev/gallery.json | python3 -c 'import json,sys; print(" ".join(x["key"] for x in json.load(sys.stdin)))'); do t=$(curl -s -o /dev/null -w "%{http_code}/%{size_download}" https://yc-templates.pages.dev/$k/thumb.webp); p=$(code https://yc-templates.pages.dev/$k/); [ "$p" = 200 ] && [ "${t%%/*}" = 200 ] || s="$s $k=$p,$t"; done
+          note "版型展示 $n 個；有問題的：${s:-無}"
+          note "版型展示 /cafe/ 內容：$(curl -s https://yc-templates.pages.dev/cafe/ | grep -o '<title>[^<]*\|noindex[^"]*\|此為版型範例[^<]*' | tr '\n' ' ')"
