@@ -1,0 +1,61 @@
+name: Deploy official site
+
+# 把官網（chi1017/yc-axiom-site 的 main）部署到 Cloudflare Pages 專案 yc-axiom（網址 *.pages.dev）。
+# 用這個 repo 已設定好的 Cloudflare 金鑰，官網 repo 不用另外設定。
+# 每 30 分鐘檢查一次官網有沒有新的 commit，有才部署；也可以手動執行（一定部署）。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,37 * * * *'
+
+concurrency:
+  group: deploy-official-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT: yc-axiom
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chi1017/yc-axiom-site
+          ref: main
+          path: official
+      - name: Check for changes
+        id: check
+        run: |
+          SHA=$(git -C official rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          LIVE=$(curl -fsS "https://$PROJECT.pages.dev/version.txt" 2>/dev/null || true)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$LIVE" = "$SHA" ]; then echo "skip=yes" >> "$GITHUB_OUTPUT"; echo "官網沒有變動"; fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'yes'
+        with:
+          path: tools
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'yes'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/package.json
+      - name: Prepare files
+        if: steps.check.outputs.skip != 'yes'
+        run: |
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'node_modules' --exclude 'tools' --exclude 'package.json' --exclude 'package-lock.json' --exclude '.gitignore' official/ out/
+          echo "${{ steps.check.outputs.sha }}" > out/version.txt
+          cp tools/build/official-headers.txt out/_headers
+      - name: Deploy
+        if: steps.check.outputs.skip != 'yes'
+        working-directory: tools
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npm install --no-audit --no-fund --prefer-offline
+          node build/deploy-official.mjs ../out
