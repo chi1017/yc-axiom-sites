@@ -38,7 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      - run: npm ci --no-audit --no-fund --prefer-offline
       - name: Build and deploy
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
