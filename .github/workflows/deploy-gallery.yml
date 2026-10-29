@@ -1,0 +1,46 @@
+name: Deploy template gallery
+
+# 手動執行：建置「版型展示」範例網站（每個行業一個虛構店家）並部署到 Cloudflare Pages 專案 yc-templates。
+# 第一次（或 refresh=yes）會從 Unsplash 挑免費授權的照片，挑選結果寫回 templates/gallery/photos.json 並推到 gallery-photos 分支。
+on:
+  workflow_dispatch:
+    inputs:
+      refresh:
+        description: 'yes＝全部重新挑照片'
+        required: false
+        default: 'no'
+
+concurrency:
+  group: deploy-gallery
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - run: npm install --no-audit --no-fund --prefer-offline
+      - name: Build and deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "${{ inputs.refresh }}" = "yes" ]; then node build/deploy-gallery.mjs --refresh-photos; else node build/deploy-gallery.mjs; fi
+      - name: Save photo choices
+        run: |
+          if git diff --quiet -- templates/gallery/photos.json 2>/dev/null && git ls-files --error-unmatch templates/gallery/photos.json >/dev/null 2>&1; then echo "照片沒有變動"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b gallery-photos
+          git add templates/gallery/photos.json
+          git commit -m "版型展示：記錄挑選的 Unsplash 照片"
+          git push -f origin gallery-photos
