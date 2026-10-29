@@ -26,6 +26,7 @@ jobs:
             done
             note "$o → $r"
           done
+          s=""; for f in serif sans round kai; do s="$s $f=$(curl -s -o /dev/null -w '%{http_code}/%{size_download}B/%{time_total}s' "$F/font-subset?f=$f&t=%E5%8D%88%E5%BE%8C%E6%97%A5%E5%85%89%E5%92%96%E5%95%A1")"; done; note "font-subset:$s"
           s=""; for u in / /version.txt /robots.txt /sitemap.xml /llms.txt /rental/ /rental/templates/ /articles/ /articles/shop-website-vs-instagram/ /articles/chatgpt-recommend-your-shop/ /seo/ /geo/ /builder/ /dashboard/ /terms/rental/ /no-such-page/; do s="$s $u=$(code "https://yc-axiom.pages.dev$u")"; done; note "官網:$s"
           note "robots: $(curl -s https://yc-axiom.pages.dev/robots.txt | tr '\n' ' ') ／ canonical: $(curl -s https://yc-axiom.pages.dev/ | grep -o '<link rel="canonical"[^>]*>')"
           n=$(curl -s https://yc-templates.pages.dev/gallery.json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
