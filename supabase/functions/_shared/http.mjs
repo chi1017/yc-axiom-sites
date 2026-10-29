@@ -7,7 +7,10 @@ export function corsHeaders(req, allowed) {
   if (origin && allowed.includes(origin)) h['Access-Control-Allow-Origin'] = origin;
   return h;
 }
+// 官網的兩個網址（GitHub Pages 與 Cloudflare Pages）一律允許，ALLOWED_ORIGINS 可再加其他來源
+export const OFFICIAL_ORIGINS = ['https://chi1017.github.io', 'https://yc-axiom.pages.dev'];
 export function parseOrigins(v) {
-  return (v || 'https://chi1017.github.io').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
+  const list = (v || '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
+  return [...new Set([...OFFICIAL_ORIGINS, ...list])];
 }
 export const json = (body, status, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers } });
