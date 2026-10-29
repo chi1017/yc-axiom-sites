@@ -52,11 +52,23 @@ async function pickPhotos(s) {
   if (free.length < 3) throw new Error(s.k + ' 免費照片不足 3 張（' + s.q + '）');
   return free.slice(0, 3).map((p) => ({ id: p.urls.raw.split('/').pop().split('?')[0], alt: p.alt_description || '', page: p.links && p.links.html, by: p.user && p.user.name }));
 }
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const cache = new Map();
 async function download(id, w, h) {
   if (OFFLINE) return sharp({ create: { width: w, height: h, channels: 3, background: { r: 180, g: 170, b: 160 } } }).webp({ quality: 60 }).toBuffer();
-  const r = await fetch('https://images.unsplash.com/' + id + '?w=' + w + '&h=' + h + '&fit=crop&crop=entropy&q=80&fm=jpg');
-  if (!r.ok) throw new Error('下載照片失敗 ' + id + ' ' + r.status);
-  return sharp(Buffer.from(await r.arrayBuffer())).resize({ width: w, height: h, fit: 'cover' }).webp({ quality: 78 }).toBuffer();
+  const key = id + ' ' + w + 'x' + h;
+  if (cache.has(key)) return cache.get(key);
+  // Unsplash 短時間下載太多會回 429：等一下再試，最多 6 次
+  for (let n = 0; ; n++) {
+    const r = await fetch('https://images.unsplash.com/' + id + '?w=' + w + '&h=' + h + '&fit=crop&crop=entropy&q=80&fm=jpg');
+    if (r.ok) {
+      const buf = await sharp(Buffer.from(await r.arrayBuffer())).resize({ width: w, height: h, fit: 'cover' }).webp({ quality: 78 }).toBuffer();
+      cache.set(key, buf); await sleep(400);
+      return buf;
+    }
+    if ((r.status === 429 || r.status >= 500) && n < 6) { console.log('等待後重試', id, r.status); await sleep(15000 * (n + 1)); continue; }
+    throw new Error('下載照片失敗 ' + id + ' ' + r.status);
+  }
 }
 
 const ROOT_URL = 'https://' + PROJECT + '.pages.dev/';
