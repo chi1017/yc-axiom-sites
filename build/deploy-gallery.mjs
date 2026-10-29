@@ -17,8 +17,9 @@ import { buildHeadingFont, HEADING_FONT_FILE } from './lib/heading-font.mjs';
 import { makeSmall } from './lib/images.mjs';
 
 // 錯誤訊息用 ::error:: 輸出，GitHub Actions 的摘要畫面看得到
-process.on('uncaughtException', (e) => { console.log('::error::' + (e && e.message || e)); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.log('::error::' + (e && e.message || e)); process.exit(1); });
+const fail = (e) => { process.exitCode = 1; process.stdout.write('::error::' + String(e && e.message || e).replace(/\n/g, ' ') + '\n'); };
+process.on('uncaughtException', fail);
+process.on('unhandledRejection', fail);
 const args = process.argv.slice(2);
 const OFFLINE = args.includes('--offline'), NO_DEPLOY = args.includes('--no-deploy') || OFFLINE, REFRESH = args.includes('--refresh-photos');
 const PROJECT = 'yc-templates';
