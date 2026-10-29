@@ -35,10 +35,18 @@ if (missing.length) throw new Error('這些行業還沒有範例內容：' + mis
 
 // ── 2. 挑照片（Unsplash 網站的公開搜尋，只取免費授權、橫式的照片）──
 const photos = existsSync(PHOTOS_FILE) ? JSON.parse(readFileSync(PHOTOS_FILE, 'utf8')) : {};
+// 公開搜尋頁：只取 images.unsplash.com/photo-（免費授權；Unsplash+ 的照片在 plus.unsplash.com，不會被取到）
+async function pickFromPage(s) {
+  const r = await fetch('https://unsplash.com/s/photos/' + encodeURIComponent(s.q.replace(/\s+/g, '-')) + '?orientation=landscape', { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36', Accept: 'text/html' } });
+  if (!r.ok) throw new Error('Unsplash 搜尋頁失敗 ' + s.k + ' ' + r.status);
+  const ids = [...new Set([...(await r.text()).matchAll(/https:\/\/images\.unsplash\.com\/(photo-[0-9]+-[0-9a-f]+)/g)].map((m) => m[1]))];
+  if (ids.length < 3) throw new Error(s.k + ' 搜尋頁的免費照片不足 3 張（' + s.q + '）');
+  return ids.slice(0, 3).map((id) => ({ id, alt: '' }));
+}
 async function pickPhotos(s) {
   const url = 'https://unsplash.com/napi/search/photos?per_page=30&orientation=landscape&query=' + encodeURIComponent(s.q);
   const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (YC AXIOM template gallery)', Accept: 'application/json' } });
-  if (!r.ok) throw new Error('Unsplash 搜尋失敗 ' + s.k + ' ' + r.status);
+  if (!r.ok) return pickFromPage(s);
   const j = await r.json();
   const free = (j.results || []).filter((p) => !p.premium && !p.plus && p.urls && /^https:\/\/images\.unsplash\.com\/photo-/.test(p.urls.raw || ''));
   if (free.length < 3) throw new Error(s.k + ' 免費照片不足 3 張（' + s.q + '）');
