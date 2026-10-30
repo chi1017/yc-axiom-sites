@@ -19,7 +19,7 @@ const db = makeSupabase({ url: SUPABASE_URL, serviceKey: need('SUPABASE_SERVICE_
 const getUser = makeGetUser({ supabaseUrl: SUPABASE_URL, anonKey: need('SUPABASE_ANON_KEY') });
 const sendMail = makeBrevoSender({ apiKey: Deno.env.get('BREVO_API_KEY') || '' });
 const dispatch = makeDispatcher({ token: Deno.env.get('GITHUB_DISPATCH_TOKEN') || '', repo: Deno.env.get('GITHUB_REPO') || 'chi1017/yc-axiom-sites', ref: Deno.env.get('GITHUB_REF') || 'main' });
-const SITE_BASE = Deno.env.get('OFFICIAL_SITE_URL') || 'https://chi1017.github.io/yc-axiom-site/';
+const SITE_BASE = Deno.env.get('OFFICIAL_SITE_URL') || 'https://yc-axiom.pages.dev/';
 const CRON_SECRET = Deno.env.get('CRON_SECRET') || '';   // 沒設定時，排程密碼驗證一律失敗（只剩管理員能呼叫）
 
 Deno.serve((req) => handleCron(req, {

@@ -805,5 +805,5 @@ var CF_TOKEN = Deno.env.get("CLOUDFLARE_API_TOKEN") || "";
 var CF_ACCOUNT = Deno.env.get("CLOUDFLARE_ACCOUNT_ID") || "";
 var cf = CF_TOKEN && CF_ACCOUNT ? makeCloudflare({ token: CF_TOKEN, accountId: CF_ACCOUNT }) : void 0;
 var sendMail = makeBrevoSender({ apiKey: Deno.env.get("BREVO_API_KEY") || "" });
-var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
+var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://yc-axiom.pages.dev/";
 Deno.serve((req) => handleMember(req, { allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")), db, getUser, dispatch, cf, sendMail, dashboardUrl: SITE_BASE + "dashboard/", adminUrl: SITE_BASE + "admin/", adminEmail: Deno.env.get("ADMIN_EMAIL") || "ycaxiom@gmail.com", paySecret: Deno.env.get("PAY_SECRET") || SERVICE }));

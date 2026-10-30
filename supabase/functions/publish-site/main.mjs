@@ -21,7 +21,7 @@ const REPO = Deno.env.get('GITHUB_REPO') || 'chi1017/yc-axiom-sites';
 const sendMail = makeBrevoSender({ apiKey: BREVO });
 const getUser = makeGetUser({ supabaseUrl: SUPABASE_URL, anonKey: ANON });
 const dispatch = makeDispatcher({ token: GH_TOKEN, repo: REPO, ref: Deno.env.get('GITHUB_REF') || 'main' });
-const SITE_BASE = Deno.env.get('OFFICIAL_SITE_URL') || 'https://chi1017.github.io/yc-axiom-site/';
+const SITE_BASE = Deno.env.get('OFFICIAL_SITE_URL') || 'https://yc-axiom.pages.dev/';
 
 Deno.serve((req) => handlePublish(req, {
   allowedOrigins: parseOrigins(Deno.env.get('ALLOWED_ORIGINS')),
