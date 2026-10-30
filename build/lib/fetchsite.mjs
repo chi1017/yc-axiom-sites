@@ -1,5 +1,5 @@
 // 抓取客戶網站（首頁、robots.txt、llms.txt）給月報檢測用。fetchImpl 可注入，方便測試。
-const UA = 'YC-AXIOM-Monthly-Report/1.0 (+https://chi1017.github.io/yc-axiom-site/)';
+const UA = 'YC-AXIOM-Monthly-Report/1.0 (+https://yc-axiom.pages.dev/)';
 const MAX_BYTES = 3 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

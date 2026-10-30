@@ -577,7 +577,7 @@ var db = makeSupabase({ url: SUPABASE_URL, serviceKey: need("SUPABASE_SERVICE_RO
 var getUser = makeGetUser({ supabaseUrl: SUPABASE_URL, anonKey: need("SUPABASE_ANON_KEY") });
 var sendMail = makeBrevoSender({ apiKey: Deno.env.get("BREVO_API_KEY") || "" });
 var dispatch = makeDispatcher({ token: Deno.env.get("GITHUB_DISPATCH_TOKEN") || "", repo: Deno.env.get("GITHUB_REPO") || "chi1017/yc-axiom-sites", ref: Deno.env.get("GITHUB_REF") || "main" });
-var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://chi1017.github.io/yc-axiom-site/";
+var SITE_BASE = Deno.env.get("OFFICIAL_SITE_URL") || "https://yc-axiom.pages.dev/";
 var CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
 Deno.serve((req) => handleCron(req, {
   allowedOrigins: parseOrigins(Deno.env.get("ALLOWED_ORIGINS")),

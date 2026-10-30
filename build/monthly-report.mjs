@@ -104,7 +104,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       db, fetchPage: makeFetchPage(), analyze: analyzers.analyze,
       sendMail: makeBrevoSender({ apiKey: process.env.BREVO_API_KEY || '' }),
       siteId: arg('site-id') || undefined, month: arg('month') || undefined, dryRun: flag('dry-run'), sendEmails: !flag('no-email'),
-      dashboardUrl: (process.env.OFFICIAL_SITE_URL || 'https://chi1017.github.io/yc-axiom-site/') + 'dashboard/'
+      dashboardUrl: (process.env.OFFICIAL_SITE_URL || 'https://yc-axiom.pages.dev/') + 'dashboard/'
     });
     const failed = out.results.filter((r) => r.status === 'failed');
     if (failed.length) console.log('::warning::' + failed.length + ' 個網站月報失敗：' + failed.map((f) => f.slug).join('、'));
