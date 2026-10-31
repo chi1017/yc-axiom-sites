@@ -108,7 +108,7 @@ export function adminSiteAlert({ kind, shopName, slug, memberEmail, paidUntil, r
   return { subject, html, text };
 }
 
-const SCORE_LABEL = (n) => (n >= 80 ? '良好' : n >= 60 ? '普通' : '需加強');
+const SCORE_LABEL = (n) => (n >= 90 ? '優秀' : n >= 80 ? '良好' : n >= 60 ? '普通，有不少可改善' : '需要優先處理');   // 與官網 SEO／GEO 工具同一套區間
 function delta(cur, prev) {
   if (prev == null) return '首次檢測';
   const d = cur - prev;
